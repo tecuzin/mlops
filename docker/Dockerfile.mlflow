@@ -1,0 +1,5 @@
+FROM ghcr.io/mlflow/mlflow:v2.18.0
+
+RUN pip install --no-cache-dir psycopg2-binary>=2.9
+
+EXPOSE 5000

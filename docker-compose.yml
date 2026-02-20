@@ -1,0 +1,109 @@
+services:
+
+  # ── Base de données PostgreSQL ──────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: mlops
+      POSTGRES_PASSWORD: mlops
+      POSTGRES_DB: mlops
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/init-multiple-dbs.sh:/docker-entrypoint-initdb.d/init-multiple-dbs.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mlops"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ── API FastAPI ─────────────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    environment:
+      DATABASE_URL: postgresql://mlops:mlops@db:5432/mlops
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./data:/app/data:ro
+      - model_outputs:/app/outputs
+
+  # ── Interface Streamlit ─────────────────────────────────────────────
+  ui:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.ui
+    environment:
+      API_URL: http://api:8000
+    ports:
+      - "8501:8501"
+    depends_on:
+      - api
+
+  # ── MLflow Tracking Server ─────────────────────────────────────────
+  mlflow:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.mlflow
+    command: >
+      mlflow server
+      --host 0.0.0.0
+      --port 5000
+      --backend-store-uri postgresql://mlops:mlops@db:5432/mlflow
+      --default-artifact-root /mlflow/artifacts
+    environment:
+      MLFLOW_TRACKING_URI: postgresql://mlops:mlops@db:5432/mlflow
+    ports:
+      - "5001:5000"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - mlflow_artifacts:/mlflow/artifacts
+
+  # ── Worker d'entraînement ──────────────────────────────────────────
+  training:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.training
+    environment:
+      API_URL: http://api:8000
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      POLL_INTERVAL: "10"
+      OUTPUT_DIR: /app/outputs
+    depends_on:
+      - api
+      - mlflow
+    volumes:
+      - ./data:/app/data:ro
+      - model_outputs:/app/outputs
+    deploy:
+      resources:
+        reservations:
+          memory: 8G
+
+  # ── Worker d'évaluation ────────────────────────────────────────────
+  evaluation:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.evaluation
+    environment:
+      API_URL: http://api:8000
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      POLL_INTERVAL: "10"
+    depends_on:
+      - api
+      - mlflow
+    volumes:
+      - ./data:/app/data:ro
+
+volumes:
+  pgdata:
+  model_outputs:
+  mlflow_artifacts:

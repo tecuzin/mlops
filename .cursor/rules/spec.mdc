@@ -1,0 +1,59 @@
+---
+alwaysApply: true
+---
+
+# Spécification du projet MLOps
+
+## Objectif
+
+Système MLOps pour l'entraînement, le fine-tuning et l'évaluation de modèles LLM, piloté par configuration YAML.
+
+## Stack technique
+
+- **Orchestration / Scheduling** : Prefect (décorateurs @flow / @task, scheduling cron, retries, UI dashboard)
+- **Tracking & Registry** : MLflow (experiment tracking, model registry, logging des métriques)
+- **Évaluation** : RAGAS (faithfulness, answer_relevancy, context_precision, context_recall)
+- **Fine-tuning** : HuggingFace Transformers + PEFT/LoRA
+- **Langage** : Python 3.11+
+
+## Architecture
+
+```
+YAML Config
+    │
+    ▼
+Prefect (orchestration + scheduling)
+    │
+    ├── Task: Fine-tuning (HuggingFace/PEFT) ──► MLflow Tracking
+    │
+    ├── Task: Évaluation RAGAS               ──► MLflow Tracking
+    │
+    └── MLflow Model Registry
+
+Prefect UI ◄── monitoring des pipelines
+MLflow UI  ◄── monitoring des expériences & métriques
+```
+
+## Configuration YAML
+
+Le fichier de configuration YAML définit pour chaque modèle :
+- Le nom / identifiant du modèle (ex: HuggingFace model ID)
+- Le type de tâche (training from scratch, fine-tuning, évaluation seule)
+- Le jeu de données associé à chaque tâche (entraînement et/ou évaluation)
+- Les hyperparamètres (learning rate, epochs, batch size, LoRA rank, etc.)
+- Les métriques RAGAS à évaluer
+
+## Pipeline
+
+1. **Chargement de la config** : lecture du YAML, validation du schéma
+2. **Entraînement / Fine-tuning** : pour chaque modèle configuré, lancement du training via HuggingFace, logging dans MLflow
+3. **Évaluation RAGAS** : évaluation des modèles entraînés avec les métriques RAGAS, logging des scores dans MLflow
+4. **Registry** : enregistrement des modèles validés dans le MLflow Model Registry
+
+## Conventions
+
+- Tout le code métier est en Python
+- Les pipelines Prefect sont définis avec les décorateurs @flow et @task
+- Chaque run MLflow est taggé avec le nom du modèle, le dataset et le type de tâche
+- Les configurations sont validées avec Pydantic avant exécution
+- Les secrets (API keys, tokens HuggingFace) sont gérés via variables d'environnement

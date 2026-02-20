@@ -1,0 +1,70 @@
+---
+alwaysApply: true
+---
+
+# Spécification UI : Application Streamlit MLOps
+
+L'application Streamlit doit permettre de piloter et de superviser les expériences MLOps via une interface utilisateur conviviale.
+
+## Structure générale
+
+L'interface se divise en trois onglets principaux :
+
+### 1. Onglet "Configuration"
+
+- Permettre à l'utilisateur de :
+  - Sélectionner un modèle (ex: HuggingFace Model ID, dropdown/texte)
+  - Choisir le type de tâche : 
+      - pré-entraînement ("training from scratch"), 
+      - fine-tuning, 
+      - évaluation seule
+  - Uploader ou sélectionner via un menu le jeu de données d'entraînement
+  - Uploader ou sélectionner le jeu de données de fine-tuning
+  - Uploader ou sélectionner le jeu de données d'évaluation
+  - Spécifier les hyperparamètres principaux : 
+      - learning rate
+      - epochs
+      - batch size
+      - LoRA rank (si applicable)
+      - autres paramètres avancés (voir possibilité d'affichage conditionnelle/avancée)
+  - Sélectionner les métriques RAGAS à évaluer (checkbox)
+
+- Un bouton "Valider & lancer le pipeline" envoie la configuration pour exécution (intégration avec le backend Prefect).
+
+### 2. Onglet "Status"
+
+- Affiche en temps réel ou quasi temps réel :
+  - La progression de l'entraînement (barre de progression, logs/sorties clé)
+  - La progression du fine-tuning
+  - La progression et les résultats provisoires de l'évaluation
+  - Les statuts d'exécution des différentes tâches (icônes/statuts Prefect : en attente, en cours, réussi, échoué)
+  - Possibilité d'afficher les logs détaillés des différentes étapes 
+  - (Optionnel) Un rafraîchissement auto ou manuel
+
+### 3. Onglet "Résultats"
+
+- Affiche :
+  - Les scores des métriques RAGAS (faithfulness, answer relevancy, context precision, context recall), sous forme de tableaux et de graphiques
+  - Les scores MLtest et statistiques diverses sur les modèles
+  - Synthèse ou rapport téléchargeable sous format .csv ou .pdf
+  - Eventuellement un "modèle champion" si plusieurs runs sont lancés, avec affichage des meilleurs scores/stats
+  - Permettre de télécharger les artefacts du modèle (modèle, tokenizer, logs, etc.)
+
+## Conventions UI
+
+- L'application doit être entièrement en français.
+- Les noms de modèles/datasets disponibles peuvent être récupérés dynamiquement via le backend ou fournis dans le YAML.
+- Toujours valider les inputs utilisateurs avant lancement du pipeline.
+- Intégration avec Prefect pour le suivi des runs, et avec MLflow/RAGAS pour l'affichage des métriques et des artefacts.
+
+## Sécurité / Accès
+- (Optionnel) Prévoir une gestion minimale de l'authentification si déploiement partagé.
+- Masquer les informations sensibles (API keys ...).
+
+## Extensions possibles
+
+- Historique des runs avec possibilité de relancer une configuration précédente.
+- Onglet "Logs" séparé pour le debug avancé.
+- Visuels interactifs pour explorer les datasets ou les sorties modèles.
+
+---
