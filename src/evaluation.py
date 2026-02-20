@@ -42,7 +42,13 @@ def evaluate_model(model_cfg: ModelConfig) -> dict[str, float]:
     logger.info("Running RAGAS evaluation with metrics: %s", metric_names)
 
     result = evaluate(dataset=ds, metrics=metrics)
-    scores = {k: v for k, v in result.items() if isinstance(v, (int, float))}
+    per_sample = result.scores
+    scores: dict[str, float] = {}
+    if per_sample:
+        metric_keys = [k for k in per_sample[0] if isinstance(per_sample[0][k], (int, float))]
+        for key in metric_keys:
+            vals = [s[key] for s in per_sample if isinstance(s.get(key), (int, float))]
+            scores[key] = sum(vals) / len(vals) if vals else 0.0
 
     mlflow.log_metrics({f"ragas_{k}": v for k, v in scores.items()})
     logger.info("RAGAS scores for %s: %s", model_cfg.name, scores)

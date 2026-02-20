@@ -196,7 +196,9 @@ def process_run(run: dict) -> None:
 
         def tokenize(example):
             prompt = f"### Question: {example['question']}\n### Answer: {example['answer']}"
-            return tokenizer(prompt, truncation=True, max_length=max_len, padding="max_length")
+            encoded = tokenizer(prompt, truncation=True, max_length=max_len, padding="max_length")
+            encoded["labels"] = encoded["input_ids"].copy()
+            return encoded
 
         _log(run_id, f"Tokenisation du dataset (max_seq_length={max_len})...")
         train_ds = ds.map(tokenize, batched=False, remove_columns=ds.column_names)

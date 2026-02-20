@@ -37,12 +37,14 @@ def _load_and_tokenize(dataset_path: str, tokenizer, max_length: int):
 
     def tokenize(example):
         prompt = f"### Question: {example['question']}\n### Answer: {example['answer']}"
-        return tokenizer(
+        encoded = tokenizer(
             prompt,
             truncation=True,
             max_length=max_length,
             padding="max_length",
         )
+        encoded["labels"] = encoded["input_ids"].copy()
+        return encoded
 
     return ds.map(tokenize, batched=False, remove_columns=ds.column_names)
 
