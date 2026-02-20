@@ -97,6 +97,8 @@ services:
       API_URL: http://api:8000
       MLFLOW_TRACKING_URI: http://mlflow:5000
       POLL_INTERVAL: "10"
+      MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
+      MISTRAL_MODEL: ${MISTRAL_MODEL:-mistral-small-latest}
     depends_on:
       - api
       - mlflow
