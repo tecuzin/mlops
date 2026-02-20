@@ -34,7 +34,8 @@ METRIC_MAP = {
 
 def _notify(run_id: int, status: str, logs: str = "", metrics: dict | None = None, error: str = ""):
     with httpx.Client(base_url=API_URL, timeout=30) as client:
-        client.patch(f"/runs/{run_id}/status", params={"status": status})
+        if status:
+            client.patch(f"/runs/{run_id}/status", params={"status": status})
         if logs:
             client.patch(f"/runs/{run_id}/logs", params={"text": logs})
         if metrics:
@@ -56,34 +57,61 @@ def _resolve_eval_path(run: dict) -> str:
     raise ValueError(f"Dataset eval id={ds_id} introuvable")
 
 
+def _log(run_id: int, message: str) -> None:
+    """Log locally and push to API."""
+    logger.info("[Run %d] %s", run_id, message)
+    _notify(run_id, "", logs=message)
+
+
+def _notify_status(run_id: int, status: str, logs: str = "", **kwargs) -> None:
+    """Update status + optional log in one call."""
+    logger.info("[Run %d] status -> %s", run_id, status)
+    _notify(run_id, status, logs=logs, **kwargs)
+
+
 def process_run(run: dict) -> None:
     run_id = run["id"]
     config = run["config_snapshot"]
     ragas_cfg = run.get("ragas_metrics_config") or config.get("ragas_metrics", {})
+    model_name = config.get("model_name", "unknown")
 
-    logger.info("Processing evaluation run %d — model %s", run_id, config["model_id"])
-    _notify(run_id, "evaluating", logs="Démarrage de l'évaluation RAGAS")
+    _notify_status(run_id, "evaluating", logs=(
+        f"Démarrage de l'évaluation RAGAS\n"
+        f"  Modèle : {config['model_id']}\n"
+        f"  Run    : {model_name}"
+    ))
 
     mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
     mlflow.set_experiment(config.get("experiment_name", "mlops-default"))
 
     eval_path = _resolve_eval_path(run)
+    _log(run_id, f"Chargement du dataset d'évaluation : {eval_path}")
     ds = load_dataset("json", data_files=eval_path, split="train")
+    _log(run_id, f"Dataset chargé — {len(ds)} exemples")
+
+    columns = list(ds.column_names)
+    _log(run_id, f"Colonnes du dataset : {columns}")
 
     selected_metrics = [
         metric for name, metric in METRIC_MAP.items()
         if ragas_cfg.get(name, True)
     ]
     metric_names = [m.name for m in selected_metrics]
-    _notify(run_id, "evaluating", logs=f"Métriques sélectionnées : {metric_names}")
+    _log(run_id, f"Métriques RAGAS sélectionnées : {metric_names}")
 
+    _log(run_id, "Lancement de l'évaluation RAGAS...")
     result = evaluate(dataset=ds, metrics=selected_metrics)
+
     scores = {k: v for k, v in result.items() if isinstance(v, (int, float))}
 
-    with mlflow.start_run(run_name=f"{config['model_name']}-eval"):
-        mlflow.log_metrics({f"ragas_{k}": v for k, v in scores.items()})
+    scores_display = "\n".join(f"  {k:<25}: {v:.4f}" for k, v in scores.items())
+    _log(run_id, f"Évaluation terminée — résultats :\n{scores_display}")
 
-    _notify(run_id, "completed", logs=f"Scores RAGAS : {scores}", metrics=scores)
+    with mlflow.start_run(run_name=f"{model_name}-eval") as mlrun:
+        mlflow.log_metrics({f"ragas_{k}": v for k, v in scores.items()})
+        _log(run_id, f"Métriques enregistrées dans MLflow (run ID : {mlrun.info.run_id})")
+
+    _notify_status(run_id, "completed", logs=f"Évaluation terminée avec succès", metrics=scores)
     logger.info("Run %d completed with scores: %s", run_id, scores)
 
 
