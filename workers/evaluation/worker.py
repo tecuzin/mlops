@@ -1,4 +1,4 @@
-"""Evaluation worker — polls the API for runs awaiting evaluation and processes them."""
+"""Evaluation worker — loads trained models, generates answers, runs RAGAS evaluation."""
 from __future__ import annotations
 
 import logging
@@ -10,7 +10,8 @@ import traceback
 
 import httpx
 import mlflow
-from datasets import load_dataset
+import torch
+from datasets import Dataset as HFDataset, load_dataset
 from langchain_mistralai import ChatMistralAI, MistralAIEmbeddings
 from ragas import evaluate
 from ragas.embeddings import LangchainEmbeddingsWrapper
@@ -21,6 +22,7 @@ from ragas.metrics import (
     context_recall,
     faithfulness,
 )
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -28,6 +30,7 @@ logger = logging.getLogger(__name__)
 API_URL = os.getenv("API_URL", "http://api:8000")
 MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5000")
 POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "10"))
+OUTPUT_DIR = os.getenv("OUTPUT_DIR", "/app/outputs")
 
 METRIC_MAP = {
     "faithfulness": faithfulness,
@@ -35,6 +38,19 @@ METRIC_MAP = {
     "context_precision": context_precision,
     "context_recall": context_recall,
 }
+
+MLSCORE_WEIGHTS = {
+    "faithfulness": 0.30,
+    "answer_relevancy": 0.20,
+    "context_precision": 0.25,
+    "context_recall": 0.25,
+}
+
+try:
+    mlflow.enable_system_metrics_logging()
+    logger.info("MLflow system metrics logging enabled")
+except Exception as exc:
+    logger.warning("Could not enable system metrics logging: %s", exc)
 
 
 def _safe_float(v) -> float:
@@ -71,15 +87,119 @@ def _resolve_eval_path(run: dict) -> str:
 
 
 def _log(run_id: int, message: str) -> None:
-    """Log locally and push to API."""
     logger.info("[Run %d] %s", run_id, message)
     _notify(run_id, "", logs=message)
 
 
 def _notify_status(run_id: int, status: str, logs: str = "", **kwargs) -> None:
-    """Update status + optional log in one call."""
     logger.info("[Run %d] status -> %s", run_id, status)
     _notify(run_id, status, logs=logs, **kwargs)
+
+
+# ── Model Inference ──────────────────────────────────────────────────
+
+
+def _load_trained_model(model_output_path: str, run_id: int):
+    """Load the trained (merged) model and tokenizer from disk."""
+    _log(run_id, f"Chargement du modèle entraîné depuis {model_output_path}...")
+
+    load_done = threading.Event()
+
+    def _progress_reporter():
+        elapsed = 0
+        while not load_done.wait(timeout=10):
+            elapsed += 10
+            _log(run_id, f"  Chargement du modèle en cours... ({elapsed}s)")
+
+    reporter = threading.Thread(target=_progress_reporter, daemon=True)
+    reporter.start()
+
+    model = AutoModelForCausalLM.from_pretrained(model_output_path)
+    tokenizer = AutoTokenizer.from_pretrained(model_output_path)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    load_done.set()
+    reporter.join(timeout=2)
+
+    total_params = sum(p.numel() for p in model.parameters())
+    _log(run_id, (
+        f"Modèle entraîné chargé\n"
+        f"  Paramètres : {total_params / 1e6:.1f}M\n"
+        f"  Dtype      : {next(model.parameters()).dtype}"
+    ))
+    return model, tokenizer
+
+
+def _generate_answers(model, tokenizer, ds, run_id: int) -> list[str]:
+    """Generate answers using the trained model for each evaluation sample."""
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model = model.to(device)
+    model.eval()
+
+    max_pos = getattr(model.config, "max_position_embeddings", 512)
+    _log(run_id, f"Context window du modèle : {max_pos} tokens")
+
+    generated_answers = []
+    n = len(ds)
+    _log(run_id, f"Début de l'inférence — {n} samples sur {device.upper()}")
+
+    for i, row in enumerate(ds):
+        question = row["question"]
+        contexts = row.get("contexts", [])
+        ctx_text = "\n".join(contexts) if contexts else ""
+
+        prompt = f"Context: {ctx_text}\n\nQuestion: {question}\n\nAnswer:"
+
+        reserve_for_generation = min(50, max_pos // 4)
+        max_input_len = max_pos - reserve_for_generation
+
+        inputs = tokenizer(
+            prompt, return_tensors="pt", truncation=True, max_length=max_input_len
+        ).to(device)
+
+        input_len = inputs["input_ids"].shape[1]
+        max_new = max_pos - input_len
+
+        try:
+            with torch.no_grad():
+                outputs = model.generate(
+                    **inputs,
+                    max_new_tokens=max_new,
+                    do_sample=True,
+                    temperature=0.7,
+                    top_p=0.9,
+                    pad_token_id=tokenizer.pad_token_id or tokenizer.eos_token_id,
+                )
+            generated_text = tokenizer.decode(
+                outputs[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True
+            ).strip()
+        except Exception as gen_err:
+            _log(run_id, f"  [{i+1}/{n}] Erreur de génération: {gen_err} — fallback vide")
+            generated_text = "(generation failed)"
+
+        generated_answers.append(generated_text)
+        preview = generated_text[:120].replace("\n", " ")
+        _log(run_id, f"  [{i+1}/{n}] Réponse générée ({len(generated_text)} chars): {preview}...")
+
+    _log(run_id, f"Inférence terminée — {n} réponses générées")
+    return generated_answers
+
+
+# ── MLScore ──────────────────────────────────────────────────────────
+
+
+def _compute_mlscore(scores: dict[str, float]) -> float:
+    total_w = 0.0
+    weighted = 0.0
+    for metric, weight in MLSCORE_WEIGHTS.items():
+        val = scores.get(metric, 0.0)
+        weighted += _safe_float(val) * weight
+        total_w += weight
+    return round(weighted / total_w, 4) if total_w > 0 else 0.0
+
+
+# ── Main processing ─────────────────────────────────────────────────
 
 
 def process_run(run: dict) -> None:
@@ -87,24 +207,50 @@ def process_run(run: dict) -> None:
     config = run["config_snapshot"]
     ragas_cfg = run.get("ragas_metrics_config") or config.get("ragas_metrics", {})
     model_name = config.get("model_name", "unknown")
+    task_type = run.get("task_type", config.get("task_type", ""))
 
     _notify_status(run_id, "evaluating", logs=(
-        f"Démarrage de l'évaluation RAGAS\n"
+        f"Démarrage de l'évaluation\n"
         f"  Modèle : {config['model_id']}\n"
-        f"  Run    : {model_name}"
+        f"  Run    : {model_name}\n"
+        f"  Task   : {task_type}"
     ))
 
     mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
     mlflow.set_experiment(config.get("experiment_name", "mlops-default"))
 
+    # ── Load evaluation dataset ───────────────────────────────────
     eval_path = _resolve_eval_path(run)
     _log(run_id, f"Chargement du dataset d'évaluation : {eval_path}")
     ds = load_dataset("json", data_files=eval_path, split="train")
-    _log(run_id, f"Dataset chargé — {len(ds)} exemples")
+    _log(run_id, f"Dataset chargé — {len(ds)} exemples, colonnes: {ds.column_names}")
 
-    columns = list(ds.column_names)
-    _log(run_id, f"Colonnes du dataset : {columns}")
+    # ── Model inference phase (if trained model available) ────────
+    model_output_path = os.path.join(OUTPUT_DIR, model_name)
+    use_model_inference = task_type == "finetune" and os.path.isdir(model_output_path)
 
+    if use_model_inference:
+        _log(run_id, "=== PHASE D'INFÉRENCE — Génération des réponses par le modèle entraîné ===")
+        model, tokenizer = _load_trained_model(model_output_path, run_id)
+        generated_answers = _generate_answers(model, tokenizer, ds, run_id)
+
+        original_answers = ds["answer"]
+        ds = ds.map(
+            lambda example, idx: {"answer": generated_answers[idx]},
+            with_indices=True,
+        )
+        _log(run_id, "Réponses du dataset remplacées par les réponses du modèle")
+
+        # Free memory
+        del model
+        del tokenizer
+        torch.cuda.empty_cache() if torch.cuda.is_available() else None
+        _log(run_id, "Mémoire du modèle libérée")
+    else:
+        original_answers = None
+        _log(run_id, "Pas de modèle entraîné disponible — utilisation des réponses pré-écrites du dataset")
+
+    # ── Select RAGAS metrics ──────────────────────────────────────
     selected_metrics = [
         metric for name, metric in METRIC_MAP.items()
         if ragas_cfg.get(name, True)
@@ -115,9 +261,10 @@ def process_run(run: dict) -> None:
     total_calls = n_samples * n_metrics
     _log(run_id, (
         f"Métriques RAGAS sélectionnées : {metric_names}\n"
-        f"  {n_samples} exemples × {n_metrics} métriques = {total_calls} appels LLM estimés"
+        f"  {n_samples} exemples × {n_metrics} métriques = ~{total_calls} appels LLM estimés"
     ))
 
+    # ── Initialize LLM judge ──────────────────────────────────────
     mistral_model = os.getenv("MISTRAL_MODEL", "mistral-small-latest")
     _log(run_id, f"Initialisation du LLM juge : Mistral ({mistral_model})")
     evaluator_llm = LangchainLLMWrapper(ChatMistralAI(model=mistral_model, temperature=0))
@@ -125,7 +272,8 @@ def process_run(run: dict) -> None:
     evaluator_embeddings = LangchainEmbeddingsWrapper(MistralAIEmbeddings())
     _log(run_id, "LLM et embeddings prêts")
 
-    _log(run_id, "Lancement de l'évaluation RAGAS (cela peut prendre plusieurs minutes)...")
+    # ── Run RAGAS evaluation ──────────────────────────────────────
+    _log(run_id, "=== PHASE D'ÉVALUATION RAGAS ===")
 
     eval_done = threading.Event()
 
@@ -150,18 +298,23 @@ def process_run(run: dict) -> None:
 
     _log(run_id, "Évaluation RAGAS terminée — traitement des résultats")
 
+    # ── Process per-sample scores ─────────────────────────────────
     per_sample = result.scores
     _log(run_id, f"Scores par sample ({len(per_sample)} exemples) :")
     for i, row_scores in enumerate(per_sample):
         parts = []
         for k, v in row_scores.items():
             if isinstance(v, (int, float)):
-                if math.isfinite(v):
-                    parts.append(f"{k}={v:.4f}")
-                else:
-                    parts.append(f"{k}=NaN")
+                parts.append(f"{k}={v:.4f}" if math.isfinite(v) else f"{k}=NaN")
+        answer_preview = (ds[i]["answer"] or "")[:80].replace("\n", " ")
         _log(run_id, f"  Sample {i+1}/{len(per_sample)}: {', '.join(parts)}")
+        if use_model_inference:
+            _log(run_id, f"    Réponse modèle : {answer_preview}...")
+            if original_answers:
+                ref_preview = (original_answers[i] or "")[:80].replace("\n", " ")
+                _log(run_id, f"    Réponse réf.   : {ref_preview}...")
 
+    # ── Compute average scores ────────────────────────────────────
     scores: dict[str, float] = {}
     if per_sample:
         metric_keys = [k for k in per_sample[0] if isinstance(per_sample[0][k], (int, float))]
@@ -169,16 +322,60 @@ def process_run(run: dict) -> None:
             vals = [_safe_float(s[key]) for s in per_sample if isinstance(s.get(key), (int, float))]
             scores[key] = sum(vals) / len(vals) if vals else 0.0
 
-    scores_display = "\n".join(f"  {k:<25}: {v:.4f}" for k, v in scores.items())
-    _log(run_id, f"Scores moyens :\n{scores_display}")
+    # ── Compute MLScore ───────────────────────────────────────────
+    mlscore = _compute_mlscore(scores)
+    scores["ml_score"] = mlscore
 
+    scores_display = "\n".join(f"  {k:<25}: {v:.4f}" for k, v in scores.items())
+    _log(run_id, f"=== RÉSULTATS FINAUX ===\n{scores_display}")
+    _log(run_id, f"MLScore composite         : {mlscore:.4f}")
+    if use_model_inference:
+        _log(run_id, "(Scores basés sur les réponses générées par le modèle entraîné)")
+    else:
+        _log(run_id, "(Scores basés sur les réponses pré-écrites du dataset)")
+
+    # ── Log to MLflow ─────────────────────────────────────────────
     with mlflow.start_run(run_name=f"{model_name}-eval") as mlrun:
         safe_mlflow = {f"ragas_{k}": _safe_float(v) for k, v in scores.items()}
+        safe_mlflow["ml_score"] = mlscore
+        safe_mlflow["inference_mode"] = 1.0 if use_model_inference else 0.0
+        safe_mlflow["eval_samples"] = float(n_samples)
         mlflow.log_metrics(safe_mlflow)
+
+        mlflow.log_params({
+            "model_name": model_name,
+            "model_id": config["model_id"],
+            "eval_dataset": eval_path,
+            "task_type": task_type,
+            "inference_mode": "model" if use_model_inference else "dataset",
+            "llm_judge": mistral_model,
+            "ragas_metrics": str(metric_names),
+        })
+
+        if use_model_inference and per_sample:
+            inference_table = []
+            for i, row_scores in enumerate(per_sample):
+                entry = {
+                    "question": ds[i]["question"],
+                    "model_answer": ds[i]["answer"],
+                    "ground_truth": ds[i].get("ground_truth", ""),
+                    **{k: _safe_float(v) for k, v in row_scores.items() if isinstance(v, (int, float))},
+                }
+                inference_table.append(entry)
+            try:
+                import json
+                table_path = "/tmp/inference_results.json"
+                with open(table_path, "w") as f:
+                    json.dump(inference_table, f, ensure_ascii=False, indent=2)
+                mlflow.log_artifact(table_path, "evaluation")
+                _log(run_id, "Table d'inférence sauvegardée dans MLflow")
+            except Exception as e:
+                _log(run_id, f"Avertissement sauvegarde table : {e}")
+
         _log(run_id, f"Métriques enregistrées dans MLflow (run ID : {mlrun.info.run_id})")
 
     _notify_status(run_id, "completed", logs="Évaluation terminée avec succès", metrics=scores)
-    logger.info("Run %d completed with scores: %s", run_id, scores)
+    logger.info("Run %d completed — MLScore=%.4f, scores: %s", run_id, mlscore, scores)
 
 
 def poll_loop():

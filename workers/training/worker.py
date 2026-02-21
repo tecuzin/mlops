@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import os
 import time
 import traceback
@@ -30,6 +31,12 @@ API_URL = os.getenv("API_URL", "http://api:8000")
 MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5000")
 POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "10"))
 OUTPUT_DIR = os.getenv("OUTPUT_DIR", "/app/outputs")
+
+try:
+    mlflow.enable_system_metrics_logging()
+    logger.info("MLflow system metrics logging enabled")
+except Exception as exc:
+    logger.warning("Could not enable system metrics logging: %s", exc)
 
 
 def _notify(run_id: int, status: str, logs: str = "", metrics: dict | None = None, error: str = ""):
@@ -244,21 +251,84 @@ def process_run(run: dict) -> None:
         trainer = Trainer(model=model, args=training_args, train_dataset=train_ds, processing_class=tokenizer)
         train_result = trainer.train()
 
-        train_loss = train_result.metrics.get("train_loss", "N/A")
+        train_loss = train_result.metrics.get("train_loss", 0)
+        if not isinstance(train_loss, (int, float)):
+            train_loss = 0.0
         train_runtime = train_result.metrics.get("train_runtime", 0)
         train_samples_per_sec = train_result.metrics.get("train_samples_per_second", 0)
+        train_steps_per_sec = train_result.metrics.get("train_steps_per_second", 0)
+        total_flos = train_result.metrics.get("total_flos", 0)
+        perplexity = math.exp(train_loss) if 0 < train_loss < 100 else 0.0
+
         _log(run_id, (
             f"Entraînement terminé !\n"
-            f"  Loss finale              : {train_loss}\n"
+            f"  Loss finale              : {train_loss:.6f}\n"
+            f"  Perplexité               : {perplexity:.2f}\n"
             f"  Durée                    : {train_runtime:.1f}s\n"
             f"  Samples/sec              : {train_samples_per_sec:.2f}\n"
-            f"  Steps totaux             : {train_result.global_step}"
+            f"  Steps/sec                : {train_steps_per_sec:.2f}\n"
+            f"  Steps totaux             : {train_result.global_step}\n"
+            f"  Total FLOPs              : {total_flos:.2e}"
         ))
 
-        _log(run_id, f"Sauvegarde du modèle dans {output_path}...")
-        trainer.save_model(output_path)
+        # ── Merge LoRA weights for clean inference ────────────────
+        if lora_config:
+            _log(run_id, "Fusion des poids LoRA dans le modèle de base...")
+            model = model.merge_and_unload()
+            _log(run_id, "Fusion LoRA terminée — modèle complet prêt pour l'inférence")
+
+        _log(run_id, f"Sauvegarde du modèle fusionné dans {output_path}...")
+        model.config._name_or_path = model_hf_id
+        model.save_pretrained(output_path)
         tokenizer.save_pretrained(output_path)
         _log(run_id, "Modèle et tokenizer sauvegardés")
+
+        # ── Log comprehensive metrics to MLflow ───────────────────
+        extra_metrics = {
+            "final_train_loss": float(train_loss),
+            "perplexity": perplexity,
+            "train_runtime_seconds": float(train_runtime),
+            "train_samples_per_second": float(train_samples_per_sec),
+            "train_steps_per_second": float(train_steps_per_sec),
+            "total_flos": float(total_flos),
+            "total_steps": float(train_result.global_step),
+            "trainable_params": float(sum(p.numel() for p in model.parameters())),
+            "model_size_mb": float(sum(p.numel() * p.element_size() for p in model.parameters()) / (1024 ** 2)),
+        }
+        mlflow.log_metrics(extra_metrics)
+        _log(run_id, "Métriques supplémentaires enregistrées dans MLflow")
+
+        # ── Register model in MLflow Model Registry ───────────────
+        _log(run_id, "Enregistrement des artefacts dans MLflow...")
+        mlflow.log_artifacts(output_path, "model")
+        model_uri = f"runs:/{mlrun.info.run_id}/model"
+        registered_name = config["model_name"]
+        _log(run_id, f"Enregistrement dans le Model Registry : {registered_name}")
+        try:
+            from mlflow.tracking import MlflowClient
+            client = MlflowClient()
+            try:
+                client.create_registered_model(registered_name)
+                _log(run_id, f"Registered model '{registered_name}' créé")
+            except Exception:
+                _log(run_id, f"Registered model '{registered_name}' existe déjà")
+            mv = client.create_model_version(
+                name=registered_name,
+                source=model_uri,
+                run_id=mlrun.info.run_id,
+            )
+            _log(run_id, f"Modèle enregistré : {registered_name} v{mv.version}")
+        except Exception as reg_err:
+            _log(run_id, f"Avertissement Model Registry : {reg_err}")
+
+        # ── Send training metrics to API ──────────────────────────
+        api_metrics = {
+            "train_loss": float(train_loss),
+            "perplexity": perplexity,
+            "train_runtime": float(train_runtime),
+            "train_samples_per_second": float(train_samples_per_sec),
+        }
+        _notify(run_id, "", metrics=api_metrics)
 
 
 def _resolve_dataset_path(run: dict, ds_type: str) -> str:
