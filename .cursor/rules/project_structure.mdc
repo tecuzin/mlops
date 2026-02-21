@@ -1,0 +1,90 @@
+---
+alwaysApply: true
+---
+
+# Structure complète du projet MLOps
+
+## Arborescence
+
+```
+mlops/
+├── .cursor/
+│   └── rules/                          # Rules Cursor pour reproduction IA
+├── .dockerignore
+├── .env
+├── .env.example
+├── docker-compose.yml                  # Orchestration des 6 services
+├── docker/
+│   ├── Dockerfile.api                  # Image API FastAPI
+│   ├── Dockerfile.evaluation           # Image worker évaluation
+│   ├── Dockerfile.mlflow               # Image MLflow Tracking Server
+│   ├── Dockerfile.training             # Image worker entraînement
+│   └── Dockerfile.ui                   # Image Streamlit
+├── api/
+│   ├── __init__.py                     # Vide
+│   ├── main.py                         # Endpoints REST FastAPI
+│   └── schemas.py                      # Schémas Pydantic in/out
+├── ui/
+│   └── app.py                          # Application Streamlit (3 onglets)
+├── db/
+│   ├── __init__.py                     # Vide
+│   ├── init-multiple-dbs.sh            # Script shell PostgreSQL init (crée db mlflow)
+│   ├── init_db.py                      # Création tables + seed datasets
+│   ├── models.py                       # Modèles SQLAlchemy (Base, Dataset, PipelineRun, RunResult)
+│   └── session.py                      # Engine + SessionLocal + get_db()
+├── workers/
+│   ├── training/
+│   │   ├── __init__.py                 # Vide
+│   │   └── worker.py                   # Worker poll-based pour fine-tuning
+│   └── evaluation/
+│       ├── __init__.py                 # Vide
+│       └── worker.py                   # Worker poll-based pour évaluation RAGAS
+├── src/
+│   ├── __init__.py                     # Vide
+│   ├── config.py                       # Modèles Pydantic config YAML (PipelineConfig, ModelConfig, etc.)
+│   ├── evaluation.py                   # Logique RAGAS (mode standalone/Prefect)
+│   ├── pipeline.py                     # Pipeline Prefect (@flow/@task)
+│   └── training.py                     # Logique fine-tuning HuggingFace (mode standalone/Prefect)
+├── configs/
+│   ├── eval_only.yaml                  # Config évaluation seule
+│   ├── finetune_rag_qa.yaml            # Config fine-tuning + évaluation
+│   └── multi_dataset.yaml              # Config multi-domaine (médical + juridique)
+├── data/
+│   ├── train/
+│   │   ├── rag_qa_train.jsonl          # 10 exemples QA généralistes
+│   │   ├── medical_qa_train.jsonl      # 5 exemples QA médicaux
+│   │   └── legal_qa_train.jsonl        # 5 exemples QA juridiques
+│   └── eval/
+│       ├── ragas_eval.jsonl            # 8 exemples éval RAGAS généralistes
+│       ├── medical_ragas_eval.jsonl    # 3 exemples éval médicaux
+│       └── legal_ragas_eval.jsonl      # 3 exemples éval juridiques
+├── main.py                             # Point d'entrée CLI (mode standalone Prefect)
+└── requirements.txt                    # Dépendances Python (mode standalone)
+```
+
+## Architecture à deux modes
+
+Le projet supporte **deux modes d'exécution** :
+
+### Mode Docker (principal)
+- `docker compose up --build` lance 6 services
+- L'UI Streamlit communique avec l'API FastAPI
+- Les workers (training + evaluation) pollent l'API pour les runs `pending`
+- MLflow + PostgreSQL stockent les métriques et modèles
+
+### Mode standalone (CLI + Prefect)
+- `python main.py configs/finetune_rag_qa.yaml` exécute le pipeline localement
+- Utilise `src/pipeline.py` avec les décorateurs Prefect `@flow` / `@task`
+- Nécessite un serveur MLflow local + les dépendances du `requirements.txt`
+
+## Flux de données (mode Docker)
+
+```
+UI Streamlit → POST /runs → API FastAPI → PostgreSQL (status=pending)
+                                              ↓
+                            Training Worker (poll) → HuggingFace + MLflow
+                                              ↓ (status=evaluating)
+                            Evaluation Worker (poll) → RAGAS + Mistral API + MLflow
+                                              ↓ (status=completed)
+UI Streamlit ← GET /runs ← API FastAPI ← PostgreSQL (résultats)
+```

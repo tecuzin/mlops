@@ -1,0 +1,103 @@
+---
+alwaysApply: true
+---
+
+# Spécification des Workers
+
+Les deux workers fonctionnent en mode **poll-based** : ils interrogent l'API à intervalle régulier pour détecter les runs à traiter.
+
+## Architecture commune
+
+Pattern partagé par les deux workers :
+
+```python
+def poll_loop():
+    while True:
+        runs = GET /runs?status=...
+        for run in filtered_runs:
+            try:
+                process_run(run)
+            except Exception:
+                _notify(run_id, "failed", error=traceback)
+        time.sleep(POLL_INTERVAL)
+```
+
+Fonctions utilitaires communes :
+- `_notify(run_id, status, logs, metrics, error)` — met à jour le statut/logs/résultats via l'API
+- `_log(run_id, message)` — log local + push vers l'API
+- `_resolve_dataset_path(run, ds_type)` — récupère le chemin fichier via `GET /datasets`
+
+Variables d'environnement :
+- `API_URL` (default `http://api:8000`)
+- `MLFLOW_TRACKING_URI` (default `http://mlflow:5000`)
+- `POLL_INTERVAL` (default `10` secondes)
+- `OUTPUT_DIR` (default `/app/outputs`)
+
+## Worker Training (`workers/training/worker.py`)
+
+### Déclenchement
+- Poll les runs avec `status=pending` ET `task_type=finetune`
+
+### Étapes de `process_run(run)`
+
+1. **Status → "training"** + log des hyperparamètres
+2. **MLflow** : `set_experiment()` + `start_run()`
+3. **Téléchargement modèle** : `huggingface_hub.snapshot_download()` avec filtre sur les patterns `.json`, `.safetensors`, `.bin`, `.model`, `.txt`, `.py`
+4. **Chargement tokenizer** : `AutoTokenizer.from_pretrained(cache_dir)`, pad_token = eos_token si absent
+5. **Log architecture** : type, couches, dimension cachée, têtes d'attention, vocabulaire, context window
+6. **Chargement modèle** : `AutoModelForCausalLM.from_pretrained(cache_dir)` avec thread de progression (log toutes les 15s)
+7. **LoRA (si configuré)** :
+   - Détection automatique des modules cibles via `_find_target_modules()` qui compare les modules demandés avec ceux du modèle
+   - Fallback sur `KNOWN_LINEAR_NAMES` (q_proj, v_proj, k_proj, o_proj, gate_proj, up_proj, down_proj, c_attn, c_proj, c_fc, etc.)
+   - Application via `get_peft_model(model, lora_config)`
+8. **Tokenisation dataset** : format `"### Question: {question}\n### Answer: {answer}"`, padding max_length, labels = input_ids
+9. **Entraînement** : `Trainer` de HuggingFace avec `TrainingArguments`, report_to="mlflow"
+10. **Post-training** :
+    - Log des métriques (loss, perplexity, runtime, samples/sec, steps/sec, FLOPs)
+    - Fusion LoRA : `model.merge_and_unload()`
+    - Sauvegarde modèle + tokenizer dans `OUTPUT_DIR/{model_name}`
+    - Enregistrement artefacts MLflow + Model Registry
+11. **Status → "evaluating"** (le worker d'évaluation prend le relais)
+
+### MLScore training
+Métriques remontées à l'API : `train_loss`, `perplexity`, `train_runtime`, `train_samples_per_second`
+
+## Worker Evaluation (`workers/evaluation/worker.py`)
+
+### Déclenchement
+- Poll les runs avec `status=pending` ET `task_type=eval_only`
+- Poll les runs avec `status=evaluating` (post-training)
+
+### Étapes de `process_run(run)`
+
+1. **Status → "evaluating"** + log de la config
+2. **Chargement dataset évaluation** via `_resolve_eval_path()`
+3. **Phase d'inférence (si finetune)** :
+   - Charge le modèle entraîné depuis `OUTPUT_DIR/{model_name}`
+   - Génère les réponses pour chaque sample avec prompt : `"Context: {ctx}\n\nQuestion: {question}\n\nAnswer:"`
+   - Paramètres de génération : `temperature=0.7`, `top_p=0.9`, `do_sample=True`
+   - Remplace les réponses du dataset par les réponses générées
+   - Libère la mémoire du modèle (`del model` + `torch.cuda.empty_cache()`)
+4. **Phase RAGAS** :
+   - LLM juge : `ChatMistralAI(model=MISTRAL_MODEL, temperature=0)` via `LangchainLLMWrapper`
+   - Embeddings : `MistralAIEmbeddings()` via `LangchainEmbeddingsWrapper`
+   - Thread de progression (log toutes les 20s)
+   - `evaluate(dataset=ds, metrics=selected_metrics, llm=evaluator_llm, embeddings=evaluator_embeddings)`
+5. **Calcul MLScore** : moyenne pondérée des métriques RAGAS
+   ```
+   faithfulness: 0.30
+   answer_relevancy: 0.20
+   context_precision: 0.25
+   context_recall: 0.25
+   ```
+6. **Logging** : scores par sample, scores moyens, MLflow run (params + métriques + artefact inference_results.json)
+7. **Status → "completed"** + envoi des métriques à l'API
+
+### Gestion NaN/Inf
+Fonction `_safe_float(v)` : convertit toute valeur non-finie (NaN, Inf) en 0.0 avant envoi à l'API ou MLflow.
+
+## Communication entre workers
+
+Le training worker ne communique **jamais directement** avec le worker d'évaluation. La coordination se fait via l'API :
+- Training finit → status passe à "evaluating"
+- Evaluation poll → détecte les runs "evaluating" → traite

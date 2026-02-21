@@ -1,0 +1,109 @@
+---
+alwaysApply: true
+---
+
+# Guide de reproduction du projet MLOps
+
+Ce guide permet à une IA de recréer l'intégralité du projet à partir de zéro.
+
+## Ordre de création des fichiers
+
+### Phase 1 — Fondations
+
+1. **`.env.example`** et **`.env`** — variables d'environnement (PostgreSQL, API, MLflow, Mistral)
+2. **`.dockerignore`** — exclure `__pycache__`, `.git`, `.cursor`, `.env`, `outputs/`, `mlruns/`, `.venv`
+3. **`requirements.txt`** — dépendances pour le mode standalone
+
+### Phase 2 — Base de données
+
+4. **`db/__init__.py`** — fichier vide
+5. **`db/models.py`** — SQLAlchemy : `Base`, `RunStatus` (enum), `Dataset`, `PipelineRun`, `RunResult`
+6. **`db/session.py`** — `engine`, `SessionLocal`, `get_db()` avec `DATABASE_URL` depuis env
+7. **`db/init_db.py`** — `seed()` : crée les tables + insère 6 datasets de seed
+8. **`db/init-multiple-dbs.sh`** — script shell pour créer la base `mlflow` dans PostgreSQL
+
+### Phase 3 — API
+
+9. **`api/__init__.py`** — fichier vide
+10. **`api/schemas.py`** — Pydantic : `LoraParams`, `TrainingParamsIn`, `RagasMetricsIn`, `RunCreateRequest`, `DatasetOut`, `RunResultOut`, `RunOut`
+11. **`api/main.py`** — FastAPI : 7 endpoints (CRUD runs + datasets + logs + results)
+
+### Phase 4 — UI Streamlit
+
+12. **`ui/app.py`** — 3 onglets (Configuration, Status, Résultats) avec httpx, pandas, plotly
+
+### Phase 5 — Workers
+
+13. **`workers/training/__init__.py`** — fichier vide
+14. **`workers/training/worker.py`** — poll loop + `process_run()` : download, tokenize, LoRA, train, merge, save, MLflow
+15. **`workers/evaluation/__init__.py`** — fichier vide
+16. **`workers/evaluation/worker.py`** — poll loop + `process_run()` : inférence modèle, RAGAS eval, MLScore, MLflow
+
+### Phase 6 — Mode standalone (Prefect)
+
+17. **`src/__init__.py`** — fichier vide
+18. **`src/config.py`** — Pydantic : `TaskType`, `LoraConfig`, `TrainingParams`, `DatasetConfig`, `RagasMetrics`, `ModelConfig`, `PipelineConfig`, `load_config()`
+19. **`src/training.py`** — `train_model()` : fine-tuning HuggingFace avec LoRA
+20. **`src/evaluation.py`** — `evaluate_model()` : évaluation RAGAS
+21. **`src/pipeline.py`** — Prefect `@flow` / `@task` : `mlops_pipeline()`, `finetune_task()`, `evaluate_task()`, `register_task()`
+22. **`main.py`** — point d'entrée CLI (`python main.py [config.yaml] [output_dir]`)
+
+### Phase 7 — Données
+
+23. **`data/train/rag_qa_train.jsonl`** — 10 lignes QA généralistes (fr) : format `{"question", "answer", "context"}`
+24. **`data/train/medical_qa_train.jsonl`** — 5 lignes QA médicales (fr)
+25. **`data/train/legal_qa_train.jsonl`** — 5 lignes QA juridiques (fr)
+26. **`data/eval/ragas_eval.jsonl`** — 8 lignes éval IA/ML (fr) : format `{"question", "answer", "contexts", "ground_truth"}`
+27. **`data/eval/medical_ragas_eval.jsonl`** — 3 lignes éval médicales (fr)
+28. **`data/eval/legal_ragas_eval.jsonl`** — 3 lignes éval juridiques (fr)
+
+### Phase 8 — Configurations
+
+29. **`configs/finetune_rag_qa.yaml`** — 2 modèles finetune (Mistral-7B + Phi-2)
+30. **`configs/eval_only.yaml`** — 2 modèles éval seule (GPT-3.5 + LLaMA-2-7b)
+31. **`configs/multi_dataset.yaml`** — 2 modèles finetune multi-domaine (médical + juridique)
+
+### Phase 9 — Docker
+
+32. **`docker/Dockerfile.api`** — python:3.11-slim, pip fastapi/uvicorn/sqlalchemy/psycopg2/pydantic/httpx, copie db/ + api/ + data/
+33. **`docker/Dockerfile.ui`** — python:3.11-slim, pip streamlit/httpx/pandas/plotly, copie ui/
+34. **`docker/Dockerfile.mlflow`** — ghcr.io/mlflow/mlflow:v2.18.0, pip psycopg2-binary
+35. **`docker/Dockerfile.training`** — python:3.11-slim, apt gcc g++, pip torch/transformers/peft/mlflow/etc., copie workers/training/ + data/
+36. **`docker/Dockerfile.evaluation`** — python:3.11-slim, apt gcc g++, pip torch/ragas/langchain-mistralai/etc., copie workers/evaluation/ + data/
+37. **`docker-compose.yml`** — 6 services (db, api, ui, mlflow, training, evaluation) + 3 volumes (pgdata, model_outputs, mlflow_artifacts)
+
+### Phase 10 — Documentation
+
+38. **`README.md`** — architecture ASCII, tableau des conteneurs, stack, structure, démarrage rapide, API REST, schéma BDD, format données, flux, commandes utiles
+
+## Commandes pour lancer le projet
+
+```bash
+# 1. Configurer l'environnement
+cp .env.example .env
+# Éditer .env : ajouter MISTRAL_API_KEY, optionnellement HF_TOKEN
+
+# 2. Lancer tout
+docker compose up --build
+
+# 3. Interfaces
+# Streamlit UI : http://localhost:8501
+# API docs    : http://localhost:8000/docs
+# MLflow UI   : http://localhost:5001
+
+# 4. Mode standalone (sans Docker)
+pip install -r requirements.txt
+python main.py configs/finetune_rag_qa.yaml outputs/
+```
+
+## Points d'attention pour la reproduction
+
+- Les `__init__.py` de `api/`, `db/`, `src/`, `workers/training/`, `workers/evaluation/` sont vides mais nécessaires
+- Le script `db/init-multiple-dbs.sh` doit avoir les fins de ligne Unix (LF, pas CRLF)
+- Les workers n'utilisent **pas** Prefect — uniquement des boucles de polling HTTP
+- Le mode standalone (`src/` + `main.py`) utilise Prefect `@flow` / `@task`
+- Les deux modes partagent la même logique métier mais avec des interfaces différentes
+- MLflow server écoute sur le port interne 5000, exposé en 5001 sur l'hôte
+- Le training worker fusionne les poids LoRA (`merge_and_unload()`) avant sauvegarde
+- L'evaluation worker charge le modèle fusionné, génère les réponses, puis évalue avec RAGAS via Mistral comme LLM juge
+- Tous les textes d'interface, logs, et données d'exemple sont en français

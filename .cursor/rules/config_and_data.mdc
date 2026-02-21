@@ -1,0 +1,153 @@
+---
+alwaysApply: true
+---
+
+# Format de configuration YAML et données
+
+## Configuration YAML (mode standalone — `src/config.py`)
+
+### Modèles Pydantic
+
+```python
+class TaskType(str, Enum):
+    FINETUNE = "finetune"
+    EVAL_ONLY = "eval_only"
+
+class LoraConfig(BaseModel):
+    r: int = 8
+    lora_alpha: int = 16
+    lora_dropout: float = 0.05
+    target_modules: list[str] = ["q_proj", "v_proj"]
+
+class TrainingParams(BaseModel):
+    epochs: int = 3
+    batch_size: int = 4
+    learning_rate: float = 2e-5
+    warmup_steps: int = 100
+    max_seq_length: int = 512
+    gradient_accumulation_steps: int = 4
+    fp16: bool = True
+    lora: LoraConfig | None = None
+
+class DatasetConfig(BaseModel):
+    train_path: str | None = None
+    eval_path: str
+
+class RagasMetrics(BaseModel):
+    faithfulness: bool = True
+    answer_relevancy: bool = True
+    context_precision: bool = True
+    context_recall: bool = True
+
+class ModelConfig(BaseModel):
+    name: str
+    model_id: str
+    task: TaskType
+    dataset: DatasetConfig
+    training_params: TrainingParams | None = None
+    ragas_metrics: RagasMetrics = RagasMetrics()
+    register_model: bool = False
+
+class PipelineConfig(BaseModel):
+    experiment_name: str = "mlops-default"
+    models: list[ModelConfig]
+```
+
+### Exemple YAML complet (finetune_rag_qa.yaml)
+
+```yaml
+experiment_name: rag-qa-finetune
+
+models:
+  - name: mistral-7b-rag-qa
+    model_id: mistralai/Mistral-7B-v0.1
+    task: finetune
+    dataset:
+      train_path: data/train/rag_qa_train.jsonl
+      eval_path: data/eval/ragas_eval.jsonl
+    training_params:
+      epochs: 3
+      batch_size: 4
+      learning_rate: 2.0e-5
+      warmup_steps: 50
+      max_seq_length: 512
+      gradient_accumulation_steps: 4
+      fp16: true
+      lora:
+        r: 16
+        lora_alpha: 32
+        lora_dropout: 0.05
+        target_modules:
+          - q_proj
+          - v_proj
+          - k_proj
+    ragas_metrics:
+      faithfulness: true
+      answer_relevancy: true
+      context_precision: true
+      context_recall: true
+    register_model: true
+```
+
+### Exemple évaluation seule (eval_only.yaml)
+
+```yaml
+experiment_name: rag-eval-comparison
+models:
+  - name: gpt-3.5-baseline
+    model_id: openai/gpt-3.5-turbo
+    task: eval_only
+    dataset:
+      eval_path: data/eval/ragas_eval.jsonl
+    ragas_metrics:
+      faithfulness: true
+      answer_relevancy: true
+      context_precision: true
+      context_recall: true
+```
+
+## Format des données JSONL
+
+### Dataset d'entraînement
+
+Chemin : `data/train/*.jsonl`
+Format : une ligne JSON par exemple
+
+```json
+{"question": "Quelle est la capitale de la France ?", "answer": "La capitale de la France est Paris...", "context": "Paris est la capitale..."}
+```
+
+Champs :
+- `question` (string, requis) — la question posée
+- `answer` (string, requis) — la réponse attendue
+- `context` (string, requis) — le contexte source
+
+Le tokenizer du worker formate en : `"### Question: {question}\n### Answer: {answer}"`
+
+### Dataset d'évaluation RAGAS
+
+Chemin : `data/eval/*.jsonl`
+Format : une ligne JSON par exemple
+
+```json
+{"question": "Qu'est-ce que le RAG ?", "answer": "Le RAG combine...", "contexts": ["Le RAG est une architecture...", "Cette approche réduit les hallucinations..."], "ground_truth": "Le RAG combine la recherche documentaire..."}
+```
+
+Champs :
+- `question` (string, requis) — la question
+- `answer` (string, requis) — la réponse (remplacée par le modèle en mode finetune)
+- `contexts` (list[string], requis) — les contextes sources (liste, pas une seule string)
+- `ground_truth` (string, requis) — la vérité terrain pour évaluation
+
+### Datasets fournis
+
+| Fichier | Type | Domaine | Nb exemples |
+|---|---|---|---|
+| `data/train/rag_qa_train.jsonl` | train | Généraliste | 10 |
+| `data/train/medical_qa_train.jsonl` | train | Médical | 5 |
+| `data/train/legal_qa_train.jsonl` | train | Juridique | 5 |
+| `data/eval/ragas_eval.jsonl` | eval | IA/ML | 8 |
+| `data/eval/medical_ragas_eval.jsonl` | eval | Médical | 3 |
+| `data/eval/legal_ragas_eval.jsonl` | eval | Juridique | 3 |
+
+Tous les exemples sont en français.
