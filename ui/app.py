@@ -197,6 +197,37 @@ with tab_status:
                 f"ID {run['id']} — {run['created_at'][:19]}",
                 expanded=run["status"] not in ("completed", "failed"),
             ):
+                col_relaunch, col_spacer = st.columns([1, 4])
+                with col_relaunch:
+                    relaunch_clicked = st.button(
+                        "Relancer",
+                        key=f"relaunch_{run['id']}",
+                        type="primary",
+                        icon="🔄",
+                        use_container_width=True,
+                    )
+                if relaunch_clicked:
+                    snapshot = run.get("config_snapshot", {})
+                    payload = {
+                        "experiment_name": snapshot.get("experiment_name", run["experiment_name"]),
+                        "model_name": snapshot.get("model_name", run["model_name"]),
+                        "model_id": snapshot.get("model_id", run["model_id"]),
+                        "task_type": snapshot.get("task_type", run["task_type"]),
+                        "train_dataset_id": snapshot.get("train_dataset_id"),
+                        "eval_dataset_id": snapshot.get("eval_dataset_id"),
+                        "ragas_metrics": snapshot.get("ragas_metrics", {}),
+                        "register_model": snapshot.get("register_model", False),
+                    }
+                    if snapshot.get("training_params"):
+                        payload["training_params"] = snapshot["training_params"]
+                    try:
+                        new_run = api_post("/runs", json=payload)
+                        st.success(f"Run relancé ! Nouveau Run ID : **{new_run['id']}**")
+                        time.sleep(1)
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Erreur lors de la relance : {e}")
+
                 col_info, col_progress = st.columns([1, 2])
 
                 with col_info:

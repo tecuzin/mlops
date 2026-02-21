@@ -14,7 +14,8 @@ RUN pip install --no-cache-dir \
     torch>=2.4 \
     sentencepiece>=0.2 \
     protobuf>=5.28 \
-    bitsandbytes>=0.44
+    bitsandbytes>=0.44 \
+    psutil>=5.9
 
 COPY workers/training/ /app/workers/training/
 COPY data/ /app/data/
