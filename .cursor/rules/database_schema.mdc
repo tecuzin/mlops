@@ -1,0 +1,109 @@
+---
+alwaysApply: true
+---
+
+# Schéma de base de données
+
+## ORM : SQLAlchemy 2.0 (style déclaratif)
+
+Fichier : `db/models.py`
+
+Base class : `class Base(DeclarativeBase): pass`
+
+## Tables
+
+### `datasets`
+
+| Colonne | Type | Contraintes |
+|---|---|---|
+| `id` | Integer | PK, autoincrement |
+| `name` | String(255) | NOT NULL, UNIQUE |
+| `description` | Text | default="" |
+| `file_path` | String(500) | NOT NULL |
+| `dataset_type` | String(50) | NOT NULL — valeurs : "train" ou "eval" |
+| `row_count` | Integer | default=0 |
+| `created_at` | DateTime | server_default=func.now() |
+
+### `pipeline_runs`
+
+| Colonne | Type | Contraintes |
+|---|---|---|
+| `id` | Integer | PK, autoincrement |
+| `experiment_name` | String(255) | NOT NULL |
+| `status` | Enum(RunStatus) | default=PENDING |
+| `config_snapshot` | JSON | NOT NULL — snapshot complet de la config du run |
+| `mlflow_run_id` | String(255) | nullable |
+| `prefect_flow_run_id` | String(255) | nullable |
+| `created_at` | DateTime | server_default=func.now() |
+| `updated_at` | DateTime | server_default=func.now(), onupdate=func.now() |
+| `finished_at` | DateTime | nullable |
+| `error_message` | Text | nullable |
+| `logs` | Text | default="" |
+| `model_name` | String(255) | NOT NULL |
+| `model_id` | String(255) | NOT NULL — HuggingFace model ID |
+| `task_type` | String(50) | NOT NULL — "finetune" ou "eval_only" |
+| `train_dataset_id` | Integer | FK → datasets.id, nullable |
+| `eval_dataset_id` | Integer | FK → datasets.id, nullable |
+| `training_params` | JSON | nullable — hyperparamètres si finetune |
+| `ragas_metrics_config` | JSON | nullable — config métriques RAGAS |
+| `register_model` | Boolean | default=False |
+
+Relations :
+- `results` → RunResult (cascade all, delete-orphan)
+- `train_dataset` → Dataset (via train_dataset_id)
+- `eval_dataset` → Dataset (via eval_dataset_id)
+
+### `run_results`
+
+| Colonne | Type | Contraintes |
+|---|---|---|
+| `id` | Integer | PK, autoincrement |
+| `run_id` | Integer | FK → pipeline_runs.id, NOT NULL |
+| `metric_name` | String(255) | NOT NULL |
+| `metric_value` | Float | NOT NULL |
+| `created_at` | DateTime | server_default=func.now() |
+
+Relation : `run` → PipelineRun
+
+## Enum RunStatus
+
+```python
+class RunStatus(str, enum.Enum):
+    PENDING = "pending"
+    TRAINING = "training"
+    EVALUATING = "evaluating"
+    COMPLETED = "completed"
+    FAILED = "failed"
+```
+
+## Session (`db/session.py`)
+
+```python
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://mlops:mlops@db:5432/mlops")
+engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+```
+
+## Seed initial (`db/init_db.py`)
+
+Au démarrage du conteneur API, `init_db.py` :
+1. Crée toutes les tables via `Base.metadata.create_all()`
+2. Insère 6 datasets de seed (si absents) :
+
+| name | type | file_path | description |
+|---|---|---|---|
+| rag_qa_train | train | /app/data/train/rag_qa_train.jsonl | QA généraliste (10 ex.) |
+| medical_qa_train | train | /app/data/train/medical_qa_train.jsonl | QA médical (5 ex.) |
+| legal_qa_train | train | /app/data/train/legal_qa_train.jsonl | QA juridique (5 ex.) |
+| ragas_eval | eval | /app/data/eval/ragas_eval.jsonl | Éval RAGAS généraliste (8 ex.) |
+| medical_ragas_eval | eval | /app/data/eval/medical_ragas_eval.jsonl | Éval RAGAS médical (3 ex.) |
+| legal_ragas_eval | eval | /app/data/eval/legal_ragas_eval.jsonl | Éval RAGAS juridique (3 ex.) |
+
+Le `row_count` est calculé dynamiquement en comptant les lignes non-vides du fichier.

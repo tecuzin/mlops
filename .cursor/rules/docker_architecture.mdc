@@ -1,0 +1,115 @@
+---
+alwaysApply: true
+---
+
+# Architecture Docker
+
+## Composition (docker-compose.yml)
+
+6 services orchestrés par docker-compose :
+
+### 1. `db` — PostgreSQL
+- Image : `postgres:16-alpine`
+- Crée **deux** bases : `mlops` (app) + `mlflow` (tracking) via `db/init-multiple-dbs.sh`
+- Healthcheck : `pg_isready -U mlops`
+- Volume nommé `pgdata` pour persistance
+
+### 2. `api` — FastAPI
+- Dockerfile : `docker/Dockerfile.api`
+- CMD : `python -m db.init_db && uvicorn api.main:app --host 0.0.0.0 --port 8000`
+- Copie : `db/`, `api/`, `data/`
+- Dépend de `db` (healthcheck)
+- Port exposé : 8000
+- Volume partagé `model_outputs` en lecture/écriture
+
+### 3. `ui` — Streamlit
+- Dockerfile : `docker/Dockerfile.ui`
+- CMD : `streamlit run ui/app.py --server.address=0.0.0.0 --server.port=8501 --browser.gatherUsageStats=false`
+- Copie : `ui/`
+- Dépend de `api`
+- Port exposé : 8501
+- Env : `API_URL=http://api:8000`
+
+### 4. `mlflow` — MLflow Tracking Server
+- Dockerfile : `docker/Dockerfile.mlflow`
+- CMD : `mlflow server --host 0.0.0.0 --port 5000 --backend-store-uri postgresql://mlops:mlops@db:5432/mlflow --default-artifact-root /mlflow/artifacts`
+- Dépend de `db` (healthcheck)
+- Port exposé : 5001 → 5000 (interne)
+- Volume nommé `mlflow_artifacts`
+
+### 5. `training` — Worker d'entraînement
+- Dockerfile : `docker/Dockerfile.training`
+- CMD : `python -m workers.training.worker`
+- Copie : `workers/training/`, `data/`
+- Dépend de `api` + `mlflow`
+- Env : `API_URL`, `MLFLOW_TRACKING_URI`, `POLL_INTERVAL`, `OUTPUT_DIR`
+- Volume `model_outputs` en lecture/écriture + `data/` en lecture seule
+- Ressource : réservation mémoire 8G
+- Build : nécessite `gcc` + `g++` (pour torch, bitsandbytes)
+
+### 6. `evaluation` — Worker d'évaluation
+- Dockerfile : `docker/Dockerfile.evaluation`
+- CMD : `python -m workers.evaluation.worker`
+- Copie : `workers/evaluation/`, `data/`
+- Dépend de `api` + `mlflow`
+- Env : idem training + `MISTRAL_API_KEY`, `MISTRAL_MODEL`
+- Volume `model_outputs` en lecture seule + `data/` en lecture seule
+- Build : nécessite `gcc` + `g++` + `langchain-mistralai`
+
+## Volumes nommés
+
+| Volume | Utilisé par | Usage |
+|---|---|---|
+| `pgdata` | db | Persistance PostgreSQL |
+| `model_outputs` | api, training (rw), evaluation (ro) | Artefacts modèles entraînés |
+| `mlflow_artifacts` | mlflow | Artefacts MLflow |
+
+## Script init PostgreSQL (`db/init-multiple-dbs.sh`)
+
+```bash
+#!/bin/bash
+set -e
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
+    CREATE DATABASE mlflow;
+    GRANT ALL PRIVILEGES ON DATABASE mlflow TO mlops;
+EOSQL
+```
+
+Monté en lecture seule dans le conteneur db : `./db/init-multiple-dbs.sh:/docker-entrypoint-initdb.d/init-multiple-dbs.sh:ro`
+
+## Patterns Dockerfile
+
+Chaque Dockerfile suit le même pattern :
+1. `FROM python:3.11-slim`
+2. `WORKDIR /app`
+3. (optionnel) `apt-get install gcc g++` pour les workers
+4. `pip install --no-cache-dir` avec les dépendances explicites
+5. `COPY` des dossiers nécessaires uniquement
+6. `EXPOSE` le port si applicable
+7. `CMD` avec la commande de démarrage
+
+## .dockerignore
+
+```
+__pycache__
+*.pyc
+.git
+.cursor
+.env
+outputs/
+mlruns/
+*.egg-info
+.venv
+venv
+node_modules
+```
+
+## Commandes utiles
+
+```bash
+docker compose up --build              # Tout lancer
+docker compose up db api ui            # Lancer un sous-ensemble
+docker compose logs -f training        # Suivre les logs
+docker compose build training          # Reconstruire un service
+docker compose down -v                 # Tout arrêter + supprimer volumes
+```

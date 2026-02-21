@@ -1,0 +1,144 @@
+---
+alwaysApply: true
+---
+
+# Spécification API FastAPI
+
+Fichiers : `api/main.py`, `api/schemas.py`
+
+## Configuration de l'application
+
+```python
+app = FastAPI(title="MLOps API", version="1.0.0", lifespan=lifespan)
+```
+
+Le lifespan handler crée les tables SQLAlchemy au démarrage :
+```python
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    Base.metadata.create_all(bind=engine)
+    yield
+```
+
+## Endpoints
+
+### GET `/datasets`
+- Query param optionnel : `dataset_type` (filtre "train" ou "eval")
+- Response : `list[DatasetOut]`
+- Tri : par `name` croissant
+
+### POST `/runs` (status 201)
+- Body : `RunCreateRequest`
+- Validations :
+  - Le dataset d'évaluation doit exister (sinon 404)
+  - Si `task_type == "finetune"`, `train_dataset_id` est requis (sinon 400)
+  - Si `train_dataset_id` fourni, le dataset d'entraînement doit exister (sinon 404)
+- Crée un `PipelineRun` avec `status=PENDING`
+- Stocke `config_snapshot` = snapshot complet du payload (via `req.model_dump()`)
+- Response : `RunOut`
+
+### GET `/runs`
+- Query param optionnel : `status` (filtre par statut)
+- Response : `list[RunOut]`
+- Tri : par `created_at` décroissant
+
+### GET `/runs/{run_id}`
+- Response : `RunOut` ou 404
+
+### PATCH `/runs/{run_id}/status`
+- Query param : `status` (string)
+- Met à jour `run.status` vers le `RunStatus` correspondant
+- Si status "completed" ou "failed" → met `finished_at = datetime.utcnow()`
+
+### PATCH `/runs/{run_id}/logs`
+- Query param : `text` (string)
+- Append le texte au champ `logs` avec un saut de ligne
+
+### POST `/runs/{run_id}/results`
+- Body : `dict[str, float]` (nom_métrique → valeur)
+- Crée un `RunResult` par entrée du dict
+
+## Schémas Pydantic (`api/schemas.py`)
+
+### Input
+
+```python
+class LoraParams(BaseModel):
+    r: int = 8
+    lora_alpha: int = 16
+    lora_dropout: float = 0.05
+    target_modules: list[str] = Field(default_factory=lambda: ["q_proj", "v_proj"])
+
+class TrainingParamsIn(BaseModel):
+    epochs: int = 3
+    batch_size: int = 4
+    learning_rate: float = 2e-5
+    warmup_steps: int = 100
+    max_seq_length: int = 512
+    gradient_accumulation_steps: int = 4
+    fp16: bool = True
+    lora: LoraParams | None = None
+
+class RagasMetricsIn(BaseModel):
+    faithfulness: bool = True
+    answer_relevancy: bool = True
+    context_precision: bool = True
+    context_recall: bool = True
+
+class RunCreateRequest(BaseModel):
+    experiment_name: str = "mlops-default"
+    model_name: str
+    model_id: str
+    task_type: str          # "finetune" | "eval_only"
+    train_dataset_id: int | None = None
+    eval_dataset_id: int
+    training_params: TrainingParamsIn | None = None
+    ragas_metrics: RagasMetricsIn = Field(default_factory=RagasMetricsIn)
+    register_model: bool = False
+```
+
+### Output
+
+```python
+class DatasetOut(BaseModel):
+    id: int
+    name: str
+    description: str
+    file_path: str
+    dataset_type: str
+    row_count: int
+    created_at: datetime.datetime
+    model_config = {"from_attributes": True}
+
+class RunResultOut(BaseModel):
+    metric_name: str
+    metric_value: float
+    model_config = {"from_attributes": True}
+
+class RunOut(BaseModel):
+    id: int
+    experiment_name: str
+    status: str
+    model_name: str
+    model_id: str
+    task_type: str
+    config_snapshot: dict
+    mlflow_run_id: str | None
+    prefect_flow_run_id: str | None
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+    finished_at: datetime.datetime | None
+    error_message: str | None
+    logs: str
+    results: list[RunResultOut]
+    model_config = {"from_attributes": True}
+```
+
+## Pattern de communication Workers → API
+
+Les workers utilisent `httpx.Client` pour communiquer avec l'API :
+- `PATCH /runs/{id}/status?status=training` — changement de statut
+- `PATCH /runs/{id}/logs?text=...` — ajout de logs
+- `POST /runs/{id}/results` body JSON `{metric: value}` — ajout de résultats
+- `GET /runs?status=pending` — polling des runs à traiter
+- `GET /datasets` — résolution des chemins de fichiers datasets
