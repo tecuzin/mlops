@@ -100,6 +100,8 @@ services:
       OUTPUT_DIR: /app/outputs
       MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
       MISTRAL_MODEL: ${MISTRAL_MODEL:-mistral-small-latest}
+      MLSCORE_THRESHOLD: ${MLSCORE_THRESHOLD:-0.7}
+      TAG_SYNC_INTERVAL: ${TAG_SYNC_INTERVAL:-3600}
     depends_on:
       - api
       - mlflow

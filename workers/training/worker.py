@@ -127,6 +127,14 @@ def process_run(run: dict) -> None:
         )
         _log(run_id, f"Fichiers mis en cache dans {cache_dir}")
 
+        mlflow.set_tag("lifecycle", "new")
+        _log(run_id, "Tag MLflow posé : lifecycle=new")
+
+        domain = _detect_domain(run)
+        if domain:
+            mlflow.set_tag("domain", domain)
+            _log(run_id, f"Tag MLflow posé : domain={domain}")
+
         # ── Chargement du tokenizer ───────────────────────────────
         _log(run_id, f"Chargement du tokenizer {model_hf_id}...")
         tokenizer = AutoTokenizer.from_pretrained(cache_dir)
@@ -247,6 +255,9 @@ def process_run(run: dict) -> None:
             "batch_size": batch_size,
         })
 
+        mlflow.set_tag("lifecycle", "training")
+        _log(run_id, "Tag MLflow posé : lifecycle=training")
+
         _log(run_id, "Lancement de l'entraînement...")
         trainer = Trainer(model=model, args=training_args, train_dataset=train_ds, processing_class=tokenizer)
         train_result = trainer.train()
@@ -283,6 +294,9 @@ def process_run(run: dict) -> None:
         tokenizer.save_pretrained(output_path)
         _log(run_id, "Modèle et tokenizer sauvegardés")
 
+        mlflow.set_tag("lifecycle", "finetuned")
+        _log(run_id, "Tag MLflow posé : lifecycle=finetuned")
+
         # ── Log comprehensive metrics to MLflow ───────────────────
         extra_metrics = {
             "final_train_loss": float(train_loss),
@@ -318,6 +332,22 @@ def process_run(run: dict) -> None:
                 run_id=mlrun.info.run_id,
             )
             _log(run_id, f"Modèle enregistré : {registered_name} v{mv.version}")
+
+            client.set_model_version_tag(registered_name, mv.version, "lifecycle", "finetuned")
+            if domain:
+                client.set_model_version_tag(registered_name, mv.version, "domain", domain)
+            _log(run_id, f"Tags lifecycle/domain posés sur la Model Version {mv.version}")
+
+            mlflow.set_tag("lifecycle", "registered")
+            _log(run_id, "Tag MLflow posé : lifecycle=registered (modèle publié)")
+
+            with httpx.Client(base_url=API_URL, timeout=10) as http:
+                http.patch(f"/runs/{run_id}/mlflow-model", json={
+                    "mlflow_run_id": mlrun.info.run_id,
+                    "mlflow_model_name": registered_name,
+                    "mlflow_model_version": str(mv.version),
+                })
+            _log(run_id, "Infos MLflow model persistées dans l'API")
         except Exception as reg_err:
             _log(run_id, f"Avertissement Model Registry : {reg_err}")
 
@@ -344,6 +374,28 @@ def _resolve_dataset_path(run: dict, ds_type: str) -> str:
             if ds["id"] == ds_id:
                 return ds["file_path"]
     raise ValueError(f"Dataset {ds_type} id={ds_id} introuvable")
+
+
+def _detect_domain(run: dict) -> str | None:
+    """Detect domain (medic/legal) from the training dataset name."""
+    ds_id = run.get("train_dataset_id") or run["config_snapshot"].get("train_dataset_id")
+    if not ds_id:
+        return None
+    try:
+        with httpx.Client(base_url=API_URL, timeout=10) as client:
+            resp = client.get("/datasets")
+            resp.raise_for_status()
+            for ds in resp.json():
+                if ds["id"] == ds_id:
+                    name = ds["name"].lower()
+                    if "medical" in name:
+                        return "medic"
+                    if "legal" in name:
+                        return "legal"
+                    return None
+    except Exception as exc:
+        logger.warning("Could not detect domain: %s", exc)
+    return None
 
 
 def poll_loop():

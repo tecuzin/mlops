@@ -61,6 +61,12 @@ class RunResultOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class MlflowModelUpdate(BaseModel):
+    mlflow_run_id: str
+    mlflow_model_name: str | None = None
+    mlflow_model_version: str | None = None
+
+
 class RunOut(BaseModel):
     id: int
     experiment_name: str
@@ -70,6 +76,8 @@ class RunOut(BaseModel):
     task_type: str
     config_snapshot: dict
     mlflow_run_id: str | None
+    mlflow_model_name: str | None
+    mlflow_model_version: str | None
     prefect_flow_run_id: str | None
     created_at: datetime.datetime
     updated_at: datetime.datetime
