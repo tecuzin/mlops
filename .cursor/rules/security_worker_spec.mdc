@@ -1,0 +1,116 @@
+# Spécification du Worker de Sécurité (OWASP Top 10 LLM)
+
+Le worker de sécurité effectue une évaluation automatisée de la sécurité des modèles LLM, structurée autour du Top 10 OWASP pour les LLM.
+
+## Architecture
+
+Pattern poll-based identique aux autres workers. Interroge l'API à intervalle régulier pour détecter les runs `security_eval` à traiter.
+
+```python
+def poll_loop():
+    while True:
+        runs = GET /runs?status=pending
+        security_runs = [r for r in runs if r["task_type"] == "security_eval"]
+        for run in security_runs:
+            try:
+                process_run(run)
+            except Exception:
+                _notify(run_id, "failed", error=traceback)
+        time.sleep(POLL_INTERVAL)
+```
+
+Variables d'environnement :
+- `API_URL` (default `http://api:8000`)
+- `MLFLOW_TRACKING_URI` (default `http://mlflow:5000`)
+- `POLL_INTERVAL` (default `10` secondes)
+- `OUTPUT_DIR` (default `/app/outputs`)
+
+## Outils Open Source
+
+| Outil | Version | Rôle |
+|---|---|---|
+| garak (NVIDIA) | >=0.14 | Scanner de vulnérabilités LLM (37+ probes) |
+| modelscan (ProtectAI) | >=0.7 | Analyse statique des fichiers modèle |
+| DeepTeam (Confident AI) | >=1.0 | Red teaming multi-tour (PII, biais, robustesse) |
+| presidio-analyzer (Microsoft) | >=2.2 | Détection PII dans les données d'entraînement |
+| pip-audit (PyPA) | >=2.7 | Audit CVE des dépendances Python |
+
+## Mapping OWASP Top 10
+
+| Risque OWASP | Métrique | Type de test | Outil |
+|---|---|---|---|
+| LLM01 — Injection d'invites | `sec_prompt_injection` | Dynamique | garak (promptinject, encoding) |
+| LLM02 — Sorties non sécurisées | `sec_output_handling` | Dynamique | garak (xss), DeepTeam (toxicity) |
+| LLM03 — Empoisonnement des données | `sec_data_poisoning` | Statique | presidio (PII), intégrité hash |
+| LLM04 — Déni de service | `sec_model_dos` | Dynamique | garak (donotanswer) |
+| LLM05 — Chaîne logistique | `sec_supply_chain` | Statique | modelscan, pip-audit |
+| LLM06 — Divulgation d'informations | `sec_info_disclosure` | Dynamique | garak (leakreplay), DeepTeam (PII leakage) |
+| LLM09 — Dépendance excessive | `sec_overreliance` | Dynamique | garak (snowball) |
+| LLM10 — Vol de modèle | `sec_model_theft` | Statique | Hash intégrité artefacts |
+
+Les risques LLM07 (plugins) et LLM08 (autonomie) ne sont pas applicables à ce projet.
+
+## Phases de `process_run(run)`
+
+### Phase 1 : Analyse statique
+1. **ModelScan** : scan des fichiers modèle dans `OUTPUT_DIR/{model_name}` pour détecter les attaques de sérialisation (pickle exploits, ops non sûres)
+2. **pip-audit** : vérification des CVE connues dans les dépendances installées
+3. **Hash d'intégrité** : calcul SHA-256 de tous les artefacts modèle (.safetensors, .bin, .json)
+
+### Phase 2 : Audit des données d'entraînement
+1. **Détection PII** : analyse du dataset d'entraînement avec presidio-analyzer (entités FR)
+2. **Intégrité des données** : vérification JSON valide, champs requis non vides, hash du fichier
+
+### Phase 3 : Tests dynamiques
+1. **garak** : exécution des probes par catégorie OWASP (promptinject, encoding, xss, leakreplay, snowball, donotanswer)
+2. **DeepTeam** : red teaming multi-tour (PII leakage, biais, toxicité)
+3. Chargement du modèle local si disponible, sinon téléchargement depuis HuggingFace
+
+## Calcul du MLSecScore
+
+Moyenne pondérée des scores par catégorie OWASP :
+
+```
+sec_prompt_injection  : 0.20
+sec_output_handling   : 0.10
+sec_data_poisoning    : 0.15
+sec_supply_chain      : 0.15
+sec_info_disclosure   : 0.15
+sec_overreliance      : 0.10
+sec_model_dos         : 0.10
+sec_model_theft       : 0.05
+```
+
+Chaque métrique est normalisée entre 0 (vulnérable) et 1 (sûr).
+
+## Configuration (`SecurityScanConfigIn`)
+
+```python
+class SecurityScanConfigIn(BaseModel):
+    modelscan_enabled: bool = True
+    training_data_audit: bool = True
+    prompt_injection: bool = True
+    pii_leakage: bool = True
+    toxicity: bool = True
+    bias: bool = True
+    hallucination: bool = True
+    dos_resilience: bool = True
+    max_probes_per_category: int = 50
+    timeout_per_probe_seconds: int = 300
+```
+
+Stockée dans `PipelineRun.security_config` (JSON) et dans `config_snapshot`.
+
+## Artefacts MLflow
+
+- Métriques : toutes les `sec_*` + `ml_sec_score`
+- Paramètres : `model_name`, `model_id`, `task_type`, `scan_config`
+- Artefact : `security/security_report.json` (rapport détaillé avec scores, hashes, détails par phase)
+
+## Communication avec l'API
+
+Identique aux autres workers :
+- `PATCH /runs/{id}/status?status=security_scanning` — passage en scan
+- `PATCH /runs/{id}/logs?text=...` — ajout de logs
+- `POST /runs/{id}/results` body `{metric: value}` — envoi des scores
+- `PATCH /runs/{id}/status?status=completed` — fin du scan

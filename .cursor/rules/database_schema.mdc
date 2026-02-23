@@ -41,11 +41,12 @@ Base class : `class Base(DeclarativeBase): pass`
 | `logs` | Text | default="" |
 | `model_name` | String(255) | NOT NULL |
 | `model_id` | String(255) | NOT NULL — HuggingFace model ID |
-| `task_type` | String(50) | NOT NULL — "finetune" ou "eval_only" |
+| `task_type` | String(50) | NOT NULL — "finetune", "eval_only" ou "security_eval" |
 | `train_dataset_id` | Integer | FK → datasets.id, nullable |
 | `eval_dataset_id` | Integer | FK → datasets.id, nullable |
 | `training_params` | JSON | nullable — hyperparamètres si finetune |
 | `ragas_metrics_config` | JSON | nullable — config métriques RAGAS |
+| `security_config` | JSON | nullable — config évaluation sécurité OWASP |
 | `register_model` | Boolean | default=False |
 
 Relations :
@@ -72,6 +73,7 @@ class RunStatus(str, enum.Enum):
     PENDING = "pending"
     TRAINING = "training"
     EVALUATING = "evaluating"
+    SECURITY_SCANNING = "security_scanning"
     COMPLETED = "completed"
     FAILED = "failed"
 ```

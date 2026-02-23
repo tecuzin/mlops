@@ -39,6 +39,11 @@ Ce guide permet à une IA de recréer l'intégralité du projet à partir de zé
 15. **`workers/evaluation/__init__.py`** — fichier vide
 16. **`workers/evaluation/worker.py`** — poll loop + `process_run()` : inférence modèle, RAGAS eval, MLScore, MLflow
 
+### Phase 5b — Worker de sécurité (OWASP Top 10)
+
+16b. **`workers/security/__init__.py`** — fichier vide
+16c. **`workers/security/worker.py`** — poll loop + `process_run()` : 3 phases (statique: modelscan/pip-audit/hash, données: presidio PII/intégrité, dynamique: garak/DeepTeam), calcul MLSecScore, MLflow
+
 ### Phase 6 — Mode standalone (Prefect)
 
 17. **`src/__init__.py`** — fichier vide
@@ -70,7 +75,8 @@ Ce guide permet à une IA de recréer l'intégralité du projet à partir de zé
 34. **`docker/Dockerfile.mlflow`** — ghcr.io/mlflow/mlflow:v2.18.0, pip psycopg2-binary
 35. **`docker/Dockerfile.training`** — python:3.11-slim, apt gcc g++, pip torch/transformers/peft/mlflow/etc., copie workers/training/ + data/
 36. **`docker/Dockerfile.evaluation`** — python:3.11-slim, apt gcc g++, pip torch/ragas/langchain-mistralai/etc., copie workers/evaluation/ + data/
-37. **`docker-compose.yml`** — 6 services (db, api, ui, mlflow, training, evaluation) + 3 volumes (pgdata, model_outputs, mlflow_artifacts)
+36b. **`docker/Dockerfile.security`** — python:3.11-slim, apt gcc g++, pip garak/modelscan/deepteam/presidio-analyzer/pip-audit/torch/etc., copie workers/security/ + data/
+37. **`docker-compose.yml`** — 7 services (db, api, ui, mlflow, training, evaluation, security) + 3 volumes (pgdata, model_outputs, mlflow_artifacts)
 
 ### Phase 10 — Documentation
 
@@ -98,7 +104,7 @@ python main.py configs/finetune_rag_qa.yaml outputs/
 
 ## Points d'attention pour la reproduction
 
-- Les `__init__.py` de `api/`, `db/`, `src/`, `workers/training/`, `workers/evaluation/` sont vides mais nécessaires
+- Les `__init__.py` de `api/`, `db/`, `src/`, `workers/training/`, `workers/evaluation/`, `workers/security/` sont vides mais nécessaires
 - Le script `db/init-multiple-dbs.sh` doit avoir les fins de ligne Unix (LF, pas CRLF)
 - Les workers n'utilisent **pas** Prefect — uniquement des boucles de polling HTTP
 - Le mode standalone (`src/` + `main.py`) utilise Prefect `@flow` / `@task`
@@ -106,4 +112,6 @@ python main.py configs/finetune_rag_qa.yaml outputs/
 - MLflow server écoute sur le port interne 5000, exposé en 5001 sur l'hôte
 - Le training worker fusionne les poids LoRA (`merge_and_unload()`) avant sauvegarde
 - L'evaluation worker charge le modèle fusionné, génère les réponses, puis évalue avec RAGAS via Mistral comme LLM juge
+- Le security worker effectue des analyses statiques (modelscan, pip-audit), audite les données (PII via presidio), et lance des tests dynamiques (garak, DeepTeam)
+- Le security worker produit un MLSecScore pondéré basé sur les catégories OWASP Top 10 pour les LLM
 - Tous les textes d'interface, logs, et données d'exemple sont en français

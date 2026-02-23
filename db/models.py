@@ -27,6 +27,7 @@ class RunStatus(str, enum.Enum):
     PENDING = "pending"
     TRAINING = "training"
     EVALUATING = "evaluating"
+    SECURITY_SCANNING = "security_scanning"
     COMPLETED = "completed"
     FAILED = "failed"
 
@@ -66,6 +67,7 @@ class PipelineRun(Base):
 
     training_params = Column(JSON, nullable=True)
     ragas_metrics_config = Column(JSON, nullable=True)
+    security_config = Column(JSON, nullable=True)
     register_model = Column(Boolean, default=False)
 
     results = relationship("RunResult", back_populates="run", cascade="all, delete-orphan")
