@@ -4,11 +4,11 @@ alwaysApply: true
 
 # Spécification des Workers
 
-Les deux workers fonctionnent en mode **poll-based** : ils interrogent l'API à intervalle régulier pour détecter les runs à traiter.
+Les trois workers fonctionnent en mode **poll-based** : ils interrogent l'API à intervalle régulier pour détecter les runs à traiter.
 
 ## Architecture commune
 
-Pattern partagé par les deux workers :
+Pattern partagé par les trois workers :
 
 ```python
 def poll_loop():
@@ -96,8 +96,61 @@ Métriques remontées à l'API : `train_loss`, `perplexity`, `train_runtime`, `t
 ### Gestion NaN/Inf
 Fonction `_safe_float(v)` : convertit toute valeur non-finie (NaN, Inf) en 0.0 avant envoi à l'API ou MLflow.
 
+## Worker Security (`workers/security/worker.py`)
+
+### Déclenchement
+- Poll les runs avec `status=pending` ET `task_type=security_eval`
+
+### Outils open source intégrés
+- **garak** (NVIDIA, >=0.14) : scanner de vulnérabilités LLM (37+ probes)
+- **modelscan** (ProtectAI, >=0.7) : analyse statique des fichiers modèle (pickle, safetensors)
+- **DeepTeam** (Confident AI, >=1.0) : red teaming multi-tour (PII, biais, toxicité)
+- **presidio-analyzer** (Microsoft, >=2.2) : détection PII dans les données d'entraînement
+- **pip-audit** (PyPA, >=2.7) : audit CVE des dépendances Python
+
+### Étapes de `process_run(run)`
+
+1. **Status → "security_scanning"** + log de la config
+2. **Phase 1 — Analyse statique** :
+   - `modelscan` : scan des fichiers modèle dans `OUTPUT_DIR/{model_name}`
+   - `pip-audit` : vérification des CVE des dépendances
+   - Hash SHA-256 de tous les artefacts modèle
+3. **Phase 2 — Audit des données d'entraînement** :
+   - `presidio-analyzer` : détection PII dans le dataset d'entraînement
+   - Vérification d'intégrité : JSON valide, champs requis, hash du fichier
+4. **Phase 3 — Tests dynamiques** :
+   - `garak` : probes promptinject, encoding, xss, leakreplay, snowball, donotanswer
+   - `DeepTeam` : PII leakage, biais, toxicité (multi-tour)
+5. **Calcul MLSecScore** : moyenne pondérée par catégorie OWASP
+   ```
+   sec_prompt_injection  : 0.20
+   sec_output_handling   : 0.10
+   sec_data_poisoning    : 0.15
+   sec_supply_chain      : 0.15
+   sec_info_disclosure   : 0.15
+   sec_overreliance      : 0.10
+   sec_model_dos         : 0.10
+   sec_model_theft       : 0.05
+   ```
+6. **Logging** : scores OWASP, MLflow run (métriques + artefact security_report.json)
+7. **Status → "completed"** + envoi des métriques à l'API
+
+### Mapping OWASP Top 10
+
+| Risque OWASP | Métrique | Outil |
+|---|---|---|
+| LLM01 — Injection d'invites | `sec_prompt_injection` | garak |
+| LLM02 — Sorties non sécurisées | `sec_output_handling` | garak + DeepTeam |
+| LLM03 — Empoisonnement des données | `sec_data_poisoning` | presidio + intégrité |
+| LLM04 — Déni de service | `sec_model_dos` | garak |
+| LLM05 — Chaîne logistique | `sec_supply_chain` | modelscan + pip-audit |
+| LLM06 — Divulgation d'informations | `sec_info_disclosure` | garak + DeepTeam |
+| LLM09 — Dépendance excessive | `sec_overreliance` | garak |
+| LLM10 — Vol de modèle | `sec_model_theft` | Hash intégrité |
+
 ## Communication entre workers
 
-Le training worker ne communique **jamais directement** avec le worker d'évaluation. La coordination se fait via l'API :
+Les workers ne communiquent **jamais directement** entre eux. La coordination se fait via l'API :
 - Training finit → status passe à "evaluating"
 - Evaluation poll → détecte les runs "evaluating" → traite
+- Security poll → détecte les runs "pending" + "security_eval" → traite indépendamment
