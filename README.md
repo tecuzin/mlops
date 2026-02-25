@@ -1,4 +1,4 @@
-# MLOps — Entraînement & Évaluation RAGAS
+# MLOps — Entraînement & Évaluation de modèles
 
 Système MLOps conteneurisé pour le fine-tuning de LLMs et l'évaluation avec RAGAS, avec interface Streamlit, API FastAPI, et workers dédiés.
 
