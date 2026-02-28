@@ -107,6 +107,23 @@ services:
       - ./data:/app/data:ro
       - model_outputs:/app/outputs:ro
 
+  # ── Worker de sécurité (OWASP Top 10 LLM) ───────────────────────
+  security:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.security
+    environment:
+      API_URL: http://api:8000
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      POLL_INTERVAL: "10"
+      OUTPUT_DIR: /app/outputs
+    depends_on:
+      - api
+      - mlflow
+    volumes:
+      - ./data:/app/data:ro
+      - model_outputs:/app/outputs:ro
+
 volumes:
   pgdata:
   model_outputs:

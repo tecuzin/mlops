@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import datetime
-import json
 import logging
 from contextlib import asynccontextmanager
 
@@ -39,9 +38,15 @@ def list_datasets(dataset_type: str | None = None, db: Session = Depends(get_db)
 
 @app.post("/runs", response_model=RunOut, status_code=201)
 def create_run(req: RunCreateRequest, db: Session = Depends(get_db)):
-    eval_ds = db.query(Dataset).get(req.eval_dataset_id)
-    if not eval_ds:
-        raise HTTPException(404, "Dataset d'évaluation introuvable")
+    if req.task_type == "security_eval":
+        if req.security_config is None:
+            raise HTTPException(400, "security_config est requis pour une évaluation de sécurité")
+    else:
+        if req.eval_dataset_id is None:
+            raise HTTPException(400, "eval_dataset_id est requis pour ce type de tâche")
+        eval_ds = db.query(Dataset).get(req.eval_dataset_id)
+        if not eval_ds:
+            raise HTTPException(404, "Dataset d'évaluation introuvable")
 
     if req.task_type == "finetune" and req.train_dataset_id is None:
         raise HTTPException(400, "Un dataset d'entraînement est requis pour le fine-tuning")
@@ -61,6 +66,7 @@ def create_run(req: RunCreateRequest, db: Session = Depends(get_db)):
         eval_dataset_id=req.eval_dataset_id,
         training_params=req.training_params.model_dump() if req.training_params else None,
         ragas_metrics_config=req.ragas_metrics.model_dump(),
+        security_config=req.security_config.model_dump() if req.security_config else None,
         register_model=req.register_model,
         config_snapshot=req.model_dump(),
     )

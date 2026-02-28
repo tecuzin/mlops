@@ -30,11 +30,13 @@ async def lifespan(app: FastAPI):
 ### POST `/runs` (status 201)
 - Body : `RunCreateRequest`
 - Validations :
-  - Le dataset d'évaluation doit exister (sinon 404)
+  - Si `task_type == "security_eval"` : `security_config` requis (sinon 400), `eval_dataset_id` optionnel
+  - Sinon : `eval_dataset_id` requis, le dataset d'évaluation doit exister (sinon 404)
   - Si `task_type == "finetune"`, `train_dataset_id` est requis (sinon 400)
   - Si `train_dataset_id` fourni, le dataset d'entraînement doit exister (sinon 404)
 - Crée un `PipelineRun` avec `status=PENDING`
 - Stocke `config_snapshot` = snapshot complet du payload (via `req.model_dump()`)
+- Stocke `security_config` si présent
 - Response : `RunOut`
 
 ### GET `/runs`
@@ -85,15 +87,28 @@ class RagasMetricsIn(BaseModel):
     context_precision: bool = True
     context_recall: bool = True
 
+class SecurityScanConfigIn(BaseModel):
+    modelscan_enabled: bool = True
+    training_data_audit: bool = True
+    prompt_injection: bool = True
+    pii_leakage: bool = True
+    toxicity: bool = True
+    bias: bool = True
+    hallucination: bool = True
+    dos_resilience: bool = True
+    max_probes_per_category: int = 50
+    timeout_per_probe_seconds: int = 300
+
 class RunCreateRequest(BaseModel):
     experiment_name: str = "mlops-default"
     model_name: str
     model_id: str
-    task_type: str          # "finetune" | "eval_only"
+    task_type: str          # "finetune" | "eval_only" | "security_eval"
     train_dataset_id: int | None = None
-    eval_dataset_id: int
+    eval_dataset_id: int | None = None
     training_params: TrainingParamsIn | None = None
     ragas_metrics: RagasMetricsIn = Field(default_factory=RagasMetricsIn)
+    security_config: SecurityScanConfigIn | None = None
     register_model: bool = False
 ```
 

@@ -1,9 +1,10 @@
 """Create tables and seed initial datasets."""
 from __future__ import annotations
 
-import json
 import logging
 from pathlib import Path
+
+from sqlalchemy import text
 
 from db.models import Base, Dataset
 from db.session import SessionLocal, engine
@@ -58,8 +59,23 @@ def _count_lines(path: str) -> int:
     return sum(1 for line in p.read_text().splitlines() if line.strip())
 
 
+def _migrate_enum_values():
+    """Add any missing values to the PostgreSQL runstatus enum."""
+    required = ("pending", "training", "evaluating", "security_scanning", "completed", "failed")
+    with engine.connect() as conn:
+        for val in required:
+            conn.execute(text(
+                "DO $$ BEGIN "
+                f"ALTER TYPE runstatus ADD VALUE IF NOT EXISTS '{val}'; "
+                "EXCEPTION WHEN duplicate_object THEN NULL; END $$;"
+            ))
+        conn.commit()
+    logger.info("RunStatus enum values up-to-date")
+
+
 def seed():
     Base.metadata.create_all(bind=engine)
+    _migrate_enum_values()
     logger.info("Tables created")
 
     db = SessionLocal()

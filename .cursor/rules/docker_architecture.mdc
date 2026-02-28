@@ -6,7 +6,7 @@ alwaysApply: true
 
 ## Composition (docker-compose.yml)
 
-6 services orchestrés par docker-compose :
+7 services orchestrés par docker-compose :
 
 ### 1. `db` — PostgreSQL
 - Image : `postgres:16-alpine`
@@ -56,12 +56,22 @@ alwaysApply: true
 - Volume `model_outputs` en lecture seule + `data/` en lecture seule
 - Build : nécessite `gcc` + `g++` + `langchain-mistralai`
 
+### 7. `security` — Worker de sécurité (OWASP Top 10 LLM)
+- Dockerfile : `docker/Dockerfile.security`
+- CMD : `python -m workers.security.worker`
+- Copie : `workers/security/`, `data/`
+- Dépend de `api` + `mlflow`
+- Env : `API_URL`, `MLFLOW_TRACKING_URI`, `POLL_INTERVAL`, `OUTPUT_DIR`
+- Volume `model_outputs` en lecture seule + `data/` en lecture seule
+- Build : nécessite `gcc` + `g++` + `garak` + `modelscan` + `deepteam` + `presidio-analyzer` + `pip-audit`
+- Outils : garak (NVIDIA), modelscan (ProtectAI), DeepTeam (Confident AI), presidio-analyzer (Microsoft), pip-audit (PyPA)
+
 ## Volumes nommés
 
 | Volume | Utilisé par | Usage |
 |---|---|---|
 | `pgdata` | db | Persistance PostgreSQL |
-| `model_outputs` | api, training (rw), evaluation (ro) | Artefacts modèles entraînés |
+| `model_outputs` | api, training (rw), evaluation (ro), security (ro) | Artefacts modèles entraînés |
 | `mlflow_artifacts` | mlflow | Artefacts MLflow |
 
 ## Script init PostgreSQL (`db/init-multiple-dbs.sh`)

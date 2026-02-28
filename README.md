@@ -1,6 +1,6 @@
-# MLOps — Entraînement & Évaluation de modèles
+# MLOps — Entraînement, Évaluation & Sécurité LLM
 
-Système MLOps conteneurisé pour le fine-tuning de LLMs et l'évaluation avec RAGAS, avec interface Streamlit, API FastAPI, et workers dédiés.
+Système MLOps conteneurisé pour le fine-tuning de LLMs, l'évaluation avec RAGAS et l'audit de sécurité (OWASP Top 10 LLM), avec interface Streamlit, API FastAPI, et workers dédiés.
 
 ## Architecture
 
@@ -14,12 +14,12 @@ Système MLOps conteneurisé pour le fine-tuning de LLMs et l'évaluation avec R
 │  │  :8501   │  │  :8000   │  │  :5000   │  │    :5432       │  │
 │  └──────────┘  └─────┬────┘  └──────────┘  └────────────────┘  │
 │                      │                                           │
-│              ┌───────┴───────┐                                   │
-│              │               │                                   │
-│        ┌─────┴─────┐  ┌─────┴──────┐                            │
-│        │ Training  │  │ Evaluation │                             │
-│        │  Worker   │  │   Worker   │                             │
-│        └───────────┘  └────────────┘                             │
+│              ┌───────┴───────────────┐                            │
+│              │               │       │                            │
+│        ┌─────┴─────┐  ┌─────┴──────┐  ┌──────────┐              │
+│        │ Training  │  │ Evaluation │  │ Security │              │
+│        │  Worker   │  │   Worker   │  │  Worker  │              │
+│        └───────────┘  └────────────┘  └──────────┘              │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -33,6 +33,7 @@ Système MLOps conteneurisé pour le fine-tuning de LLMs et l'évaluation avec R
 | **mlflow** | MLflow Tracking Server — tracking d'expériences, model registry | 5000 | `ghcr.io/mlflow/mlflow` |
 | **training** | Worker d'entraînement — poll l'API, fine-tune les modèles via HuggingFace/LoRA | — | Custom (`Dockerfile.training`) |
 | **evaluation** | Worker d'évaluation — poll l'API, évalue les modèles avec RAGAS | — | Custom (`Dockerfile.evaluation`) |
+| **security** | Worker de sécurité — audit OWASP Top 10 LLM (garak, modelscan, DeepTeam) | — | Custom (`Dockerfile.security`) |
 
 ## Stack technique
 
@@ -45,6 +46,9 @@ Système MLOps conteneurisé pour le fine-tuning de LLMs et l'évaluation avec R
 | Tracking | MLflow |
 | Évaluation | RAGAS |
 | Fine-tuning | HuggingFace Transformers + PEFT/LoRA |
+| Sécurité LLM | garak (NVIDIA) + modelscan (ProtectAI) + DeepTeam (Confident AI) |
+| Audit PII | presidio-analyzer (Microsoft) |
+| Audit dépendances | pip-audit (PyPA) |
 | Conteneurisation | Docker Compose |
 
 ## Structure du projet
@@ -56,7 +60,8 @@ mlops/
 │   ├── Dockerfile.api              # Image API FastAPI
 │   ├── Dockerfile.ui               # Image Streamlit
 │   ├── Dockerfile.training         # Image worker entraînement
-│   └── Dockerfile.evaluation       # Image worker évaluation
+│   ├── Dockerfile.evaluation       # Image worker évaluation
+│   └── Dockerfile.security        # Image worker sécurité (OWASP Top 10)
 ├── api/
 │   ├── main.py                     # Endpoints REST (runs, datasets, résultats)
 │   └── schemas.py                  # Schémas Pydantic entrée/sortie
@@ -69,8 +74,10 @@ mlops/
 ├── workers/
 │   ├── training/
 │   │   └── worker.py               # Worker d'entraînement (poll + HuggingFace)
-│   └── evaluation/
-│       └── worker.py               # Worker d'évaluation (poll + RAGAS)
+│   ├── evaluation/
+│   │   └── worker.py               # Worker d'évaluation (poll + RAGAS)
+│   └── security/
+│       └── worker.py               # Worker de sécurité (poll + OWASP Top 10)
 ├── src/
 │   ├── config.py                   # Modèles Pydantic pour config YAML
 │   ├── training.py                 # Logique de fine-tuning (standalone)
@@ -171,7 +178,8 @@ Au démarrage, le conteneur API initialise les tables et seed 6 datasets d'exemp
 3. L'API crée un `PipelineRun` en base (statut `pending`)
 4. Le **training worker** poll l'API, détecte le run `pending` de type `finetune`, lance l'entraînement, met le statut à `training` puis `evaluating`
 5. Le **evaluation worker** poll l'API, détecte les runs `evaluating` ou `eval_only` + `pending`, lance l'évaluation RAGAS, enregistre les scores et met le statut à `completed`
-6. L'UI affiche les résultats en temps réel via polling de l'API
+6. Le **security worker** poll l'API, détecte les runs `pending` de type `security_eval`, lance l'audit de sécurité (statique + données + dynamique), calcule le MLSecScore et met le statut à `completed`
+7. L'UI affiche les résultats en temps réel via polling de l'API (scores RAGAS et/ou radar OWASP)
 
 ## Configuration YAML (mode standalone)
 

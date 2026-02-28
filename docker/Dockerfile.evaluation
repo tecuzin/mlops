@@ -18,6 +18,7 @@ RUN pip install --no-cache-dir \
     protobuf>=5.28 \
     psutil>=5.9
 
+COPY workers/__init__.py /app/workers/__init__.py
 COPY workers/evaluation/ /app/workers/evaluation/
 COPY data/ /app/data/
 
