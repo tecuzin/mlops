@@ -13,11 +13,12 @@ mlops/
 ├── .dockerignore
 ├── .env
 ├── .env.example
-├── docker-compose.yml                  # Orchestration des 6 services
+├── docker-compose.yml                  # Orchestration des 7 services
 ├── docker/
 │   ├── Dockerfile.api                  # Image API FastAPI
 │   ├── Dockerfile.evaluation           # Image worker évaluation
 │   ├── Dockerfile.mlflow               # Image MLflow Tracking Server
+│   ├── Dockerfile.security             # Image worker sécurité (OWASP Top 10)
 │   ├── Dockerfile.training             # Image worker entraînement
 │   └── Dockerfile.ui                   # Image Streamlit
 ├── api/
@@ -36,9 +37,12 @@ mlops/
 │   ├── training/
 │   │   ├── __init__.py                 # Vide
 │   │   └── worker.py                   # Worker poll-based pour fine-tuning
-│   └── evaluation/
+│   ├── evaluation/
+│   │   ├── __init__.py                 # Vide
+│   │   └── worker.py                   # Worker poll-based pour évaluation RAGAS
+│   └── security/
 │       ├── __init__.py                 # Vide
-│       └── worker.py                   # Worker poll-based pour évaluation RAGAS
+│       └── worker.py                   # Worker poll-based pour évaluation sécurité (OWASP Top 10)
 ├── src/
 │   ├── __init__.py                     # Vide
 │   ├── config.py                       # Modèles Pydantic config YAML (PipelineConfig, ModelConfig, etc.)
@@ -67,9 +71,9 @@ mlops/
 Le projet supporte **deux modes d'exécution** :
 
 ### Mode Docker (principal)
-- `docker compose up --build` lance 6 services
+- `docker compose up --build` lance 7 services
 - L'UI Streamlit communique avec l'API FastAPI
-- Les workers (training + evaluation) pollent l'API pour les runs `pending`
+- Les workers (training + evaluation + security) pollent l'API pour les runs `pending`
 - MLflow + PostgreSQL stockent les métriques et modèles
 
 ### Mode standalone (CLI + Prefect)
@@ -87,4 +91,11 @@ UI Streamlit → POST /runs → API FastAPI → PostgreSQL (status=pending)
                             Evaluation Worker (poll) → RAGAS + Mistral API + MLflow
                                               ↓ (status=completed)
 UI Streamlit ← GET /runs ← API FastAPI ← PostgreSQL (résultats)
+
+Flux sécurité (task_type=security_eval) :
+UI Streamlit → POST /runs → API FastAPI → PostgreSQL (status=pending)
+                                              ↓
+                            Security Worker (poll) → garak + modelscan + DeepTeam + MLflow
+                                              ↓ (status=security_scanning → completed)
+UI Streamlit ← GET /runs ← API FastAPI ← PostgreSQL (scores OWASP)
 ```

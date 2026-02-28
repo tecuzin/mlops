@@ -30,15 +30,29 @@ class RagasMetricsIn(BaseModel):
     context_recall: bool = True
 
 
+class SecurityScanConfigIn(BaseModel):
+    modelscan_enabled: bool = True
+    training_data_audit: bool = True
+    prompt_injection: bool = True
+    pii_leakage: bool = True
+    toxicity: bool = True
+    bias: bool = True
+    hallucination: bool = True
+    dos_resilience: bool = True
+    max_probes_per_category: int = 50
+    timeout_per_probe_seconds: int = 300
+
+
 class RunCreateRequest(BaseModel):
     experiment_name: str = "mlops-default"
     model_name: str
     model_id: str
-    task_type: str  # "finetune" | "eval_only"
+    task_type: str  # "finetune" | "eval_only" | "security_eval"
     train_dataset_id: int | None = None
-    eval_dataset_id: int
+    eval_dataset_id: int | None = None
     training_params: TrainingParamsIn | None = None
     ragas_metrics: RagasMetricsIn = Field(default_factory=RagasMetricsIn)
+    security_config: SecurityScanConfigIn | None = None
     register_model: bool = False
 
 
