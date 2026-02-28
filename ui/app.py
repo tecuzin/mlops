@@ -347,6 +347,34 @@ with tab_results:
         ragas_metric_names = ["faithfulness", "answer_relevancy", "context_precision", "context_recall", "ml_score"]
         training_metric_names = ["train_loss", "perplexity", "train_runtime", "train_samples_per_second"]
 
+        try:
+            all_datasets = {d["id"]: d["name"] for d in api_get("/datasets")}
+        except Exception:
+            all_datasets = {}
+
+        def _lifecycle_tag(run):
+            if run.get("mlflow_model_version"):
+                return "finetuned"
+            if run["task_type"] == "finetune":
+                return "trained"
+            return ""
+
+        def _domain_tag(run):
+            for key in ("train_dataset_id", "eval_dataset_id"):
+                ds_id = run.get(key) or run.get("config_snapshot", {}).get(key)
+                if ds_id:
+                    name = all_datasets.get(ds_id, "").lower()
+                    if "medical" in name:
+                        return "medic"
+                    if "legal" in name:
+                        return "legal"
+            return ""
+
+        def _validation_tag(run):
+            for r in run.get("results", []):
+                if r["metric_name"] == "ml_score":
+                    return "validated" if r["metric_value"] >= 0.7 else "rejected"
+            return ""
         # ── Tableau des métriques RAGAS ───────────────────────
         st.subheader("Scores RAGAS")
         rows = []
@@ -357,6 +385,9 @@ with tab_results:
                 "Modèle": run["model_name"],
                 "Model ID": run["model_id"],
                 "Tâche": run["task_type"],
+                "Lifecycle": _lifecycle_tag(run),
+                "Domaine": _domain_tag(run),
+                "Validation": _validation_tag(run),
                 "Date": run["created_at"][:19],
             }
             for m in ragas_metric_names:
@@ -367,7 +398,8 @@ with tab_results:
         df = pd.DataFrame(rows)
         st.dataframe(df, hide_index=True)
 
-        metric_cols = [c for c in ragas_metric_names if c in df.columns]
+        NON_METRIC_COLS = {"Run ID", "Modèle", "Model ID", "Tâche", "Lifecycle", "Domaine", "Validation", "Date"}
+        metric_cols = [c for c in df.columns if c not in NON_METRIC_COLS]
 
         if metric_cols:
             st.subheader("Comparaison graphique")

@@ -1,0 +1,60 @@
+---
+description: "Commande : Extraire les rules de reproduction du projet pour qu'une IA puisse le recréer from scratch"
+alwaysApply: false
+---
+
+# Commande : Extraction des rules de reproduction projet
+
+Quand cette rule est invoquée, exécute la procédure suivante pour analyser le projet courant et générer un ensemble complet de rules `.cursor/rules/` permettant à une autre IA de reproduire le projet à partir de zéro.
+
+## Procédure
+
+### Étape 1 — Exploration exhaustive
+
+Explore le projet en profondeur pour collecter :
+- L'arborescence complète (exclure `__pycache__`, `.git`, `node_modules`, `.venv`, `venv`, `outputs/`, `mlruns/`)
+- Le contenu de **tous** les fichiers de code source
+- Le contenu de tous les fichiers de configuration (YAML, JSON, TOML, .env.example, Makefile, Dockerfile, docker-compose, etc.)
+- Le contenu du README et de la documentation
+- Les dépendances (requirements.txt, pyproject.toml, package.json, etc.)
+- Les fichiers de données d'exemple (formats, schémas, quelques lignes)
+- Les rules `.cursor/rules/` existantes
+
+### Étape 2 — Génération des rules
+
+Crée ou met à jour les fichiers `.cursor/rules/` suivants (tous avec `alwaysApply: true`) :
+
+1. **`project_structure.mdc`** — Arborescence complète, architecture globale, flux de données, modes d'exécution
+2. **`stack_and_deps.mdc`** — Stack technique, dépendances par module/service, variables d'environnement, conventions de code
+3. **`docker_architecture.mdc`** (si applicable) — Services Docker, Dockerfiles, compose, volumes, réseau
+4. **`database_schema.mdc`** (si applicable) — Modèles ORM, tables, relations, migrations, seed data
+5. **`api_spec.mdc`** (si applicable) — Endpoints, schémas in/out, authentification, patterns de communication
+6. **`workers_spec.mdc`** (si applicable) — Workers, jobs, queues, patterns asynchrones
+7. **`config_and_data.mdc`** — Formats de configuration, formats de données, exemples concrets
+8. **`reproduction_guide.mdc`** — Ordre de création des fichiers (phase par phase), commandes de lancement, points d'attention
+
+Ne génère que les rules pertinentes pour le projet analysé. Adapte les noms et contenus au contexte réel.
+
+### Étape 3 — Vérification
+
+- Liste les fichiers générés avec leur taille
+- Vérifie que l'ensemble des rules couvre **100% de l'architecture et du code** du projet
+- Signale tout aspect du projet qui n'est pas couvert
+
+## Exigences qualité pour les rules
+
+- Chaque rule doit être **autosuffisante** : lisible sans contexte externe
+- Inclure des **exemples de code concrets** (schémas Pydantic, config YAML, structures JSON, etc.)
+- Documenter les **patterns et conventions** implicites (nommage, imports, logging, gestion d'erreurs)
+- Préciser les **relations entre composants** (qui appelle qui, flux de données)
+- Mentionner les **pièges et points d'attention** pour la reproduction
+- Les rules ne doivent **pas dupliquer le code** intégralement mais en extraire la structure et les patterns
+- Langue : suivre la langue dominante du projet (si français → rules en français)
+
+## Résultat attendu
+
+À la fin, une IA disposant uniquement de ces rules et d'un workspace vide doit pouvoir :
+1. Comprendre l'architecture complète du projet
+2. Recréer chaque fichier dans le bon ordre
+3. Reproduire les patterns de code et conventions
+4. Lancer le projet avec les bonnes commandes

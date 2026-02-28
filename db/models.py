@@ -70,6 +70,9 @@ class PipelineRun(Base):
     security_config = Column(JSON, nullable=True)
     register_model = Column(Boolean, default=False)
 
+    mlflow_model_name = Column(String(255), nullable=True)
+    mlflow_model_version = Column(String(50), nullable=True)
+
     results = relationship("RunResult", back_populates="run", cascade="all, delete-orphan")
     train_dataset = relationship("Dataset", foreign_keys=[train_dataset_id])
     eval_dataset = relationship("Dataset", foreign_keys=[eval_dataset_id])
