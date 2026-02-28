@@ -1,0 +1,32 @@
+---
+description: Historique de reference pour la consolidation de branches discutee le 2026-02-28.
+alwaysApply: true
+---
+
+# Historique de reference (2026-02-28)
+
+## Intention utilisateur
+
+Converger les branches en cours vers une seule branche cible, avec:
+- comparaison inter-branches
+- plan de test global
+- strategie de merge sure
+
+## Contexte observe pendant la conversation
+
+- Branches locales: `main`, `prospective`, `tags`
+- Branches distantes: `origin/main`, `origin/prospective`, `origin/tags`
+- `main` local etait en retard sur `origin/main` (1 commit) au moment de l'analyse
+- Chevauchements sensibles identifies: `api/main.py`, `api/schemas.py`, `db/models.py`, `docker-compose.yml`, `ui/app.py`
+
+## Decision de travail proposee
+
+- Utiliser `origin/main` comme base de reference.
+- Créer une branche d'integration unique avant merge final.
+- Integrer `tags` puis `prospective` avec checkpoints QA entre chaque etape.
+
+## Regles d'actualisation
+
+- Cette note est un snapshot de conversation, pas une verite permanente.
+- Revalider la divergence Git et les risques avant toute execution reelle.
+- Mettre a jour cette regle si la topologie des branches change.
