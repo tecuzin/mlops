@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from db.models import Base, Dataset, PipelineRun, RunResult, RunStatus
 from db.session import engine, get_db
 
-from .schemas import DatasetOut, RunCreateRequest, RunOut
+from .schemas import DatasetOut, MlflowModelUpdate, RunCreateRequest, RunOut
 
 logger = logging.getLogger(__name__)
 
@@ -122,5 +122,19 @@ def add_run_results(run_id: int, metrics: dict[str, float], db: Session = Depend
         raise HTTPException(404, "Run introuvable")
     for name, value in metrics.items():
         db.add(RunResult(run_id=run_id, metric_name=name, metric_value=value))
+    db.commit()
+    return {"ok": True}
+
+
+@app.patch("/runs/{run_id}/mlflow-model")
+def update_mlflow_model(run_id: int, body: MlflowModelUpdate, db: Session = Depends(get_db)):
+    run = db.query(PipelineRun).get(run_id)
+    if not run:
+        raise HTTPException(404, "Run introuvable")
+    run.mlflow_run_id = body.mlflow_run_id
+    if body.mlflow_model_name is not None:
+        run.mlflow_model_name = body.mlflow_model_name
+    if body.mlflow_model_version is not None:
+        run.mlflow_model_version = body.mlflow_model_version
     db.commit()
     return {"ok": True}
