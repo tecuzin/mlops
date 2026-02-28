@@ -1,0 +1,88 @@
+---
+description: Plan de test QA BMAD executable apres chaque merge (smoke, fonctionnel, integration, non-regression, securite, perf).
+alwaysApply: true
+---
+
+# BMAD Merge QA Test Plan
+
+## Objectif
+
+Garantir une validation reproductible apres chaque etape de fusion, avec une decision explicite GO/NO-GO.
+
+## Moment d'application
+
+- Apres chaque merge intermediaire (`prospective`, puis `tags`).
+- En validation finale avant PR.
+- Si un test critique echoue, stopper la campagne et ouvrir un point de decision.
+
+## Checklist QA obligatoire
+
+1. **Smoke**
+   - Objectif: verifier que les services demarrent.
+   - Prerequis: environnement local disponible.
+   - Etapes:
+     - lancer les services du projet (ou sous-ensemble minimal API/UI/DB)
+     - verifier que les endpoints de base repondent
+   - Attendu: services UP, aucun crash immediat.
+   - Go/No-Go: NO-GO si un service coeur ne demarre pas.
+
+2. **Fonctionnel**
+   - Objectif: valider les parcours utilisateur critiques.
+   - Prerequis: API + UI accessibles.
+   - Etapes:
+     - lister datasets (`GET /datasets`)
+     - creer un run valide (`POST /runs`)
+     - verifier le suivi de statut (`GET /runs`, `GET /runs/{id}`)
+   - Attendu: creation run OK, statuts coherents, payloads conformes schemas.
+   - Go/No-Go: NO-GO en cas de regression API/UI visible.
+
+3. **Integration inter-services**
+   - Objectif: verifier la chaine API <-> DB <-> workers <-> MLflow.
+   - Prerequis: stack composee disponible.
+   - Etapes:
+     - soumettre au moins un run representatif
+     - verifier transition de statut (pending -> training/evaluating/security_scanning -> completed/failed)
+     - verifier persistence des resultats en base et tracking MLflow
+   - Attendu: transitions completes et donnees tracees sans incoherence.
+   - Go/No-Go: NO-GO si pipeline bloque ou etats incoherents.
+
+4. **Non-regression**
+   - Objectif: confirmer qu'aucun domaine sensible n'a degrade.
+   - Prerequis: liste des fichiers a risque de la campagne.
+   - Etapes:
+     - controler en priorite `api/main.py`, `api/schemas.py`, `db/models.py`, `docker-compose.yml`, `ui/app.py`
+     - verifier compatibilite schemas API/DB et contrats attendus
+   - Attendu: comportements existants preserves.
+   - Go/No-Go: NO-GO si rupture de contrat ou incompatibilite montante.
+
+5. **Securite de base**
+   - Objectif: eviter l'introduction de risques evidents.
+   - Prerequis: logs et configurations accessibles.
+   - Etapes:
+     - verifier absence d'exposition de secrets
+     - verifier variables d'environnement critiques
+     - verifier qu'aucune commande destructive Git n'a ete utilisee
+   - Attendu: hygiene securite respectee.
+   - Go/No-Go: NO-GO si secret expose ou pratique interdite constatee.
+
+6. **Performance de base**
+   - Objectif: detecter regressions grossieres de temps de reponse.
+   - Prerequis: scenarios de test minimaux disponibles.
+   - Etapes:
+     - comparer rapidement latence des endpoints critiques avant/apres
+     - verifier absence d'erreurs timeout immediates
+   - Attendu: pas de degradation majeure evidente.
+   - Go/No-Go: NO-GO si degradation nette sur flux critiques.
+
+## Regle de decision
+
+- **GO** seulement si aucun critere bloquant n'est present.
+- **NO-GO** des qu'un test critique echoue; documenter cause, impact, mitigation, prochain essai.
+
+## Format de rapport QA (obligatoire)
+
+- Contexte: branche fusionnee, commit/merge concerne.
+- Resultats par bloc: Smoke / Fonctionnel / Integration / Non-regression / Securite / Perf.
+- Decision: GO ou NO-GO.
+- Actions: correctifs immediats, risques residuels, re-test planifie.
+

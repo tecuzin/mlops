@@ -1,5 +1,5 @@
 ---
-description: Workflow BMAD pour comparaison de branches, plan de test global et merge sécurisé.
+description: Cadre BMAD complet pour campagnes de fusion vers `main` avec runbook, QA checkpoints et gestion des conflits.
 alwaysApply: true
 ---
 
@@ -21,6 +21,7 @@ puis proposer une convergence vers une seule branche cible.
 - Ne jamais modifier la configuration Git.
 - Ne jamais faire de commit automatique sans validation explicite utilisateur.
 - Si une information est manquante, poser une question bloquante au lieu d'inventer.
+- Si la copie de travail n'est pas propre, imposer un assainissement (`commit` explicite ou `git stash push -u`) avant tout merge.
 
 ## Processus BMAD obligatoire
 
@@ -44,6 +45,66 @@ puis proposer une convergence vers une seule branche cible.
 5. **Validation QA**
    - Inclure smoke, fonctionnel, integration, non-regression, securite/perf de base.
    - Pour chaque test: objectif, prerequis, etapes, attendu, Go/No-Go.
+
+## Regle de ciblage pour ce depot
+
+- Exception BMAD validee: en absence de branche `next`, la cible de convergence est `main`.
+- Base de reference prioritaire: `origin/main`.
+- Lorsqu'une campagne concerne `prospective` et `tags`, privilegier l'ordre:
+  1) `prospective` (lot plus petit), 2) `tags`.
+
+## Runbook operationnel standard (campagne type)
+
+1. **Pre-check et diagnostic**
+   - `git status --short --branch`
+   - `git branch -a`
+   - `git log --oneline --decorate --graph --all -n 40`
+   - `git rev-list --left-right --count main...prospective`
+   - `git rev-list --left-right --count main...tags`
+   - `git diff --stat main...prospective`
+   - `git diff --stat main...tags`
+2. **Assainissement local obligatoire**
+   - Exiger un working tree propre avant merge (`commit` dedie ou `git stash push -u`).
+   - Re-verifier avec `git status` jusqu'a etat propre.
+3. **Preparation de la base**
+   - `git checkout main`
+   - `git pull --ff-only origin main`
+   - Snapshot rapide de controle (`status`, `log --graph`).
+4. **Merge 1: `prospective`**
+   - `git merge --no-ff prospective`
+   - Si conflit: resolution minimale, orientee conservation fonctionnelle.
+   - Commit de merge explicite si requis.
+   - Checkpoint QA GO/NO-GO avant de continuer.
+5. **Merge 2: `tags`**
+   - `git merge --no-ff tags`
+   - Prioriser les fichiers a recouvrement sensible:
+     - `api/main.py`
+     - `api/schemas.py`
+     - `db/models.py`
+     - `docker-compose.yml`
+     - `ui/app.py`
+   - Commit de merge explicite si requis.
+   - Checkpoint QA GO/NO-GO avant cloture.
+6. **Validation finale**
+   - `git status`
+   - `git log --oneline --decorate --graph --all -n 40`
+   - Executer lint/tests/build disponibles.
+   - Produire le recap: branches fusionnees, conflits resolus, fichiers sensibles modifies, risques residuels.
+
+## Regles de resolution de conflits (ordre impose)
+
+1. API et schemas (`api/main.py`, `api/schemas.py`)
+2. Base de donnees (`db/models.py`)
+3. Docker et workers (`docker-compose.yml`, Dockerfiles, workers)
+4. UI (`ui/app.py`)
+
+## Strategie de rollback / mitigation
+
+- En cas de risque eleve pendant une fusion:
+  - Stopper la campagne apres le checkpoint en cours.
+  - Ouvrir des PRs intermediaires par domaine (API/UI/docs) au lieu d'un enchainement direct.
+- Ne jamais utiliser de commande destructive pour "annuler rapidement".
+- Formaliser les risques residuels et valider explicitement la reprise avec l'utilisateur.
 
 ## Format de restitution obligatoire
 
