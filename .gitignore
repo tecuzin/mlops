@@ -1,2 +1,9 @@
 .spectra/
 openspec/.vector-search.db*
+__pycache__/
+*.pyc
+*.pyo
+*.crc
+captures/
+lakehouse/metadata/
+lakehouse/warehouse/
