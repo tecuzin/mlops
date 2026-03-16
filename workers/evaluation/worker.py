@@ -23,6 +23,7 @@ from ragas.metrics import (
     faithfulness,
 )
 from transformers import AutoModelForCausalLM, AutoTokenizer
+from workers.lakehouse_ref import resolve_lakehouse_dataset_path
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -31,6 +32,7 @@ API_URL = os.getenv("API_URL", "http://api:8000")
 MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5000")
 POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "10"))
 OUTPUT_DIR = os.getenv("OUTPUT_DIR", "/app/outputs")
+LAKEHOUSE_METADATA_DIR = os.getenv("LAKEHOUSE_METADATA_DIR", "/app/lakehouse/metadata")
 MLSCORE_THRESHOLD = float(os.getenv("MLSCORE_THRESHOLD", "0.7"))
 
 METRIC_MAP = {
@@ -75,6 +77,18 @@ def _notify(run_id: int, status: str, logs: str = "", metrics: dict | None = Non
 
 
 def _resolve_eval_path(run: dict) -> str:
+    lakehouse_ref = run.get("eval_lakehouse_ref") or run["config_snapshot"].get("eval_lakehouse_ref")
+    if lakehouse_ref:
+        path = resolve_lakehouse_dataset_path(lakehouse_ref, LAKEHOUSE_METADATA_DIR, role="eval")
+        _log(run["id"], (
+            "Dataset eval résolu via lakehouse snapshot\n"
+            f"  table={lakehouse_ref.get('namespace')}.{lakehouse_ref.get('table')}\n"
+            f"  ref={lakehouse_ref.get('reference', 'main')}\n"
+            f"  snapshot={lakehouse_ref.get('snapshot_id')}\n"
+            f"  path={path}"
+        ))
+        return path
+
     ds_id = run.get("eval_dataset_id") or run["config_snapshot"].get("eval_dataset_id")
     if not ds_id:
         raise ValueError("Pas de dataset d'évaluation pour ce run")

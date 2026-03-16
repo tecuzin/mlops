@@ -1,0 +1,11 @@
+{
+  "dataset": "bronze.rag_qa",
+  "fields": [
+    { "name": "question", "type": "string", "nullable": false },
+    { "name": "answer", "type": "string", "nullable": false },
+    { "name": "context", "type": "string", "nullable": false },
+    { "name": "ingestion_ts", "type": "timestamp", "nullable": false },
+    { "name": "source_id", "type": "string", "nullable": false },
+    { "name": "batch_id", "type": "string", "nullable": false }
+  ]
+}
