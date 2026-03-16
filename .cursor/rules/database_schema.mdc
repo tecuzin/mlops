@@ -44,10 +44,14 @@ Base class : `class Base(DeclarativeBase): pass`
 | `task_type` | String(50) | NOT NULL — "finetune", "eval_only" ou "security_eval" |
 | `train_dataset_id` | Integer | FK → datasets.id, nullable |
 | `eval_dataset_id` | Integer | FK → datasets.id, nullable |
+| `train_lakehouse_ref` | JSON | nullable — ref snapshot immuable pour dataset train |
+| `eval_lakehouse_ref` | JSON | nullable — ref snapshot immuable pour dataset eval |
 | `training_params` | JSON | nullable — hyperparamètres si finetune |
 | `ragas_metrics_config` | JSON | nullable — config métriques RAGAS |
 | `security_config` | JSON | nullable — config évaluation sécurité OWASP |
 | `register_model` | Boolean | default=False |
+| `mlflow_model_name` | String(255) | nullable |
+| `mlflow_model_version` | String(50) | nullable |
 
 Relations :
 - `results` → RunResult (cascade all, delete-orphan)
@@ -97,7 +101,8 @@ def get_db():
 
 Au démarrage du conteneur API, `init_db.py` :
 1. Crée toutes les tables via `Base.metadata.create_all()`
-2. Insère 6 datasets de seed (si absents) :
+2. Exécute une migration légère compatible pour ajouter les colonnes lakehouse si absentes
+3. Insère 6 datasets de seed (si absents) :
 
 | name | type | file_path | description |
 |---|---|---|---|

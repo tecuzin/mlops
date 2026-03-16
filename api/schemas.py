@@ -43,6 +43,14 @@ class SecurityScanConfigIn(BaseModel):
     timeout_per_probe_seconds: int = 300
 
 
+class LakehouseRefIn(BaseModel):
+    catalog: str = "nessie"
+    namespace: str
+    table: str
+    reference: str = "main"
+    snapshot_id: str
+
+
 class RunCreateRequest(BaseModel):
     experiment_name: str = "mlops-default"
     model_name: str
@@ -53,6 +61,8 @@ class RunCreateRequest(BaseModel):
     training_params: TrainingParamsIn | None = None
     ragas_metrics: RagasMetricsIn = Field(default_factory=RagasMetricsIn)
     security_config: SecurityScanConfigIn | None = None
+    train_lakehouse_ref: LakehouseRefIn | None = None
+    eval_lakehouse_ref: LakehouseRefIn | None = None
     register_model: bool = False
 
 
@@ -88,6 +98,8 @@ class RunOut(BaseModel):
     model_name: str
     model_id: str
     task_type: str
+    train_lakehouse_ref: dict | None
+    eval_lakehouse_ref: dict | None
     config_snapshot: dict
     mlflow_run_id: str | None
     mlflow_model_name: str | None

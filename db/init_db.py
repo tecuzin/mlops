@@ -73,9 +73,25 @@ def _migrate_enum_values():
     logger.info("RunStatus enum values up-to-date")
 
 
+def _migrate_pipeline_run_columns():
+    """Add optional lakehouse reference columns when upgrading existing databases."""
+    with engine.connect() as conn:
+        conn.execute(text(
+            "ALTER TABLE pipeline_runs "
+            "ADD COLUMN IF NOT EXISTS train_lakehouse_ref JSON;"
+        ))
+        conn.execute(text(
+            "ALTER TABLE pipeline_runs "
+            "ADD COLUMN IF NOT EXISTS eval_lakehouse_ref JSON;"
+        ))
+        conn.commit()
+    logger.info("PipelineRun lakehouse columns up-to-date")
+
+
 def seed():
     Base.metadata.create_all(bind=engine)
     _migrate_enum_values()
+    _migrate_pipeline_run_columns()
     logger.info("Tables created")
 
     db = SessionLocal()

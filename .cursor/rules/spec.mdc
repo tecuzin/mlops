@@ -6,37 +6,40 @@ alwaysApply: true
 
 ## Objectif
 
-Système MLOps pour l'entraînement, le fine-tuning et l'évaluation de modèles LLM, piloté par configuration YAML.
+Système MLOps pour l'entraînement, le fine-tuning, l'évaluation et l'audit sécurité de modèles LLM, avec une entrée de données lakehouse (medallion Bronze/Silver/Gold) pilotée localement.
 
 ## Stack technique
 
-- **Orchestration / Scheduling** : Prefect (décorateurs @flow / @task, scheduling cron, retries, UI dashboard)
-- **Tracking & Registry** : MLflow (experiment tracking, model registry, logging des métriques)
-- **Évaluation** : RAGAS (faithfulness, answer_relevancy, context_precision, context_recall)
+- **API/UI** : FastAPI + Streamlit
+- **Exécution asynchrone** : workers poll-based (training/evaluation/security)
+- **Tracking & Registry** : MLflow
+- **Évaluation** : RAGAS
 - **Fine-tuning** : HuggingFace Transformers + PEFT/LoRA
+- **Lakehouse local** : MinIO + Spark + Nessie (Bronze/Silver/Gold)
+- **Mode standalone** : Prefect (`@flow` / `@task`)
 - **Langage** : Python 3.11+
 
 ## Architecture
 
 ```
-YAML Config
-    │
-    ▼
-Prefect (orchestration + scheduling)
-    │
-    ├── Task: Fine-tuning (HuggingFace/PEFT) ──► MLflow Tracking
-    │
-    ├── Task: Évaluation RAGAS               ──► MLflow Tracking
-    │
-    └── MLflow Model Registry
-
-Prefect UI ◄── monitoring des pipelines
-MLflow UI  ◄── monitoring des expériences & métriques
+Data sources (JSONL) -> Spark Bronze -> Spark Silver -> Spark Gold (metadata snapshot)
+                                                       |
+                                                       v
+UI Streamlit -> API FastAPI -> PostgreSQL (runs/status/config)
+                              |
+                              +-> Training worker -> MLflow
+                              +-> Evaluation worker -> MLflow
+                              +-> Security worker -> MLflow
 ```
 
 ## Configuration YAML
 
-Le fichier de configuration YAML définit pour chaque modèle :
+Le projet supporte deux modes de configuration :
+
+- **Docker/API (principal)** : création de runs via `POST /runs`
+- **Standalone/CLI** : YAML (`configs/*.yaml`) exécuté via `main.py`
+
+En standalone, le fichier YAML définit pour chaque modèle :
 - Le nom / identifiant du modèle (ex: HuggingFace model ID)
 - Le type de tâche (training from scratch, fine-tuning, évaluation seule)
 - Le jeu de données associé à chaque tâche (entraînement et/ou évaluation)
@@ -45,15 +48,18 @@ Le fichier de configuration YAML définit pour chaque modèle :
 
 ## Pipeline
 
-1. **Chargement de la config** : lecture du YAML, validation du schéma
-2. **Entraînement / Fine-tuning** : pour chaque modèle configuré, lancement du training via HuggingFace, logging dans MLflow
-3. **Évaluation RAGAS** : évaluation des modèles entraînés avec les métriques RAGAS, logging des scores dans MLflow
-4. **Registry** : enregistrement des modèles validés dans le MLflow Model Registry
+1. **Ingestion lakehouse** : Bronze -> Silver -> Gold, génération de metadata snapshot
+2. **Création run** : payload API avec `*_dataset_id` (legacy) ou `*_lakehouse_ref` (snapshot immuable)
+3. **Entraînement / Fine-tuning** : training worker + tracking MLflow
+4. **Évaluation RAGAS** : evaluation worker + MLScore + sync tags MLflow
+5. **Sécurité** : security worker (OWASP Top 10 LLM)
 
 ## Conventions
 
 - Tout le code métier est en Python
-- Les pipelines Prefect sont définis avec les décorateurs @flow et @task
+- Les workers Docker utilisent un mode poll-based via l'API
+- Le mode standalone Prefect reste disponible avec `@flow`/`@task`
+- Les runs supportent des références lakehouse snapshotées pour reproductibilité
 - Chaque run MLflow est taggé avec le nom du modèle, le dataset et le type de tâche
 - Les configurations sont validées avec Pydantic avant exécution
 - Les secrets (API keys, tokens HuggingFace) sont gérés via variables d'environnement
