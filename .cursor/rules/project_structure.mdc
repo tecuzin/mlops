@@ -13,7 +13,7 @@ mlops/
 ├── .dockerignore
 ├── .env
 ├── .env.example
-├── docker-compose.yml                  # Orchestration des 7 services
+├── docker-compose.yml                  # Orchestration des services app + lakehouse
 ├── docker/
 │   ├── Dockerfile.api                  # Image API FastAPI
 │   ├── Dockerfile.evaluation           # Image worker évaluation
@@ -33,7 +33,32 @@ mlops/
 │   ├── init_db.py                      # Création tables + seed datasets
 │   ├── models.py                       # Modèles SQLAlchemy (Base, Dataset, PipelineRun, RunResult)
 │   └── session.py                      # Engine + SessionLocal + get_db()
+├── lakehouse/
+│   ├── __init__.py
+│   ├── RUNBOOK.md                      # Runbook opérationnel local
+│   ├── ROLLOUT_CHECKLIST.md            # Checklist de rollout
+│   ├── contracts/
+│   │   ├── bronze_schema.json
+│   │   └── source_to_bronze_mapping.json
+│   ├── governance/
+│   │   └── medallion_guardrails.md
+│   ├── jobs/
+│   │   ├── bronze_ingest.py
+│   │   ├── silver_transform.py
+│   │   └── gold_materialize.py
+│   ├── quality/
+│   │   ├── __init__.py
+│   │   └── silver_quality.py
+│   └── scripts/
+│       ├── bootstrap_local.sh
+│       ├── run_bronze.sh
+│       ├── run_silver.sh
+│       ├── run_gold.sh
+│       ├── retention_cleanup.sh
+│       ├── compact_silver_gold.sh
+│       └── validate_reproducibility.sh
 ├── workers/
+│   ├── lakehouse_ref.py                # Résolution table/snapshot -> dataset consommable
 │   ├── training/
 │   │   ├── __init__.py                 # Vide
 │   │   └── worker.py                   # Worker poll-based pour fine-tuning
@@ -62,6 +87,8 @@ mlops/
 │       ├── ragas_eval.jsonl            # 8 exemples éval RAGAS généralistes
 │       ├── medical_ragas_eval.jsonl    # 3 exemples éval médicaux
 │       └── legal_ragas_eval.jsonl      # 3 exemples éval juridiques
+├── docs/
+│   └── uml_schemas.md                  # Diagrammes UML (composants/séquence/classes)
 ├── main.py                             # Point d'entrée CLI (mode standalone Prefect)
 └── requirements.txt                    # Dépendances Python (mode standalone)
 ```
@@ -71,9 +98,10 @@ mlops/
 Le projet supporte **deux modes d'exécution** :
 
 ### Mode Docker (principal)
-- `docker compose up --build` lance 7 services
+- `docker compose up --build` lance l'app + la stack lakehouse locale
 - L'UI Streamlit communique avec l'API FastAPI
-- Les workers (training + evaluation + security) pollent l'API pour les runs `pending`
+- Les workers (training + evaluation + security) pollent l'API pour les runs
+- MinIO/Nessie/Spark assurent le pipeline medallion Bronze/Silver/Gold
 - MLflow + PostgreSQL stockent les métriques et modèles
 
 ### Mode standalone (CLI + Prefect)
@@ -91,6 +119,13 @@ UI Streamlit → POST /runs → API FastAPI → PostgreSQL (status=pending)
                             Evaluation Worker (poll) → RAGAS + Mistral API + MLflow
                                               ↓ (status=completed)
 UI Streamlit ← GET /runs ← API FastAPI ← PostgreSQL (résultats)
+
+Flux lakehouse (ingestion data) :
+Sources fichiers → Spark Bronze → Spark Silver (DQ) → Spark Gold (snapshot metadata)
+                                            ↓
+                       Références `*_lakehouse_ref` utilisées dans `POST /runs`
+                                            ↓
+                Workers consomment un snapshot immuable (fallback legacy dataset_id)
 
 Flux sécurité (task_type=security_eval) :
 UI Streamlit → POST /runs → API FastAPI → PostgreSQL (status=pending)

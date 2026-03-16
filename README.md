@@ -1,206 +1,115 @@
-# MLOps — Entraînement, Évaluation & Sécurité LLM
+# MLOps — Entraînement, Évaluation, Sécurité et Lakehouse
 
-Système MLOps conteneurisé pour le fine-tuning de LLMs, l'évaluation avec RAGAS et l'audit de sécurité (OWASP Top 10 LLM), avec interface Streamlit, API FastAPI, et workers dédiés.
+Système MLOps conteneurisé pour entraîner, évaluer et auditer des modèles LLM, avec une entrée data lakehouse locale (medallion Bronze/Silver/Gold) pilotée par Spark.
 
-## Architecture
+## Architecture actuelle
 
-```
-┌──────────────────────────────────────────────────────────────────┐
-│                        docker-compose                            │
-│                                                                  │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌────────────────┐  │
-│  │    UI    │  │   API    │  │  MLflow  │  │   PostgreSQL   │  │
-│  │ Streamlit│──│ FastAPI  │──│ Tracking │──│    (données)   │  │
-│  │  :8501   │  │  :8000   │  │  :5000   │  │    :5432       │  │
-│  └──────────┘  └─────┬────┘  └──────────┘  └────────────────┘  │
-│                      │                                           │
-│              ┌───────┴───────────────┐                            │
-│              │               │       │                            │
-│        ┌─────┴─────┐  ┌─────┴──────┐  ┌──────────┐              │
-│        │ Training  │  │ Evaluation │  │ Security │              │
-│        │  Worker   │  │   Worker   │  │  Worker  │              │
-│        └───────────┘  └────────────┘  └──────────┘              │
-└──────────────────────────────────────────────────────────────────┘
-```
+Le projet tourne en local Docker avec 10 services :
 
-### Conteneurs
+- `db` (PostgreSQL)
+- `api` (FastAPI)
+- `ui` (Streamlit)
+- `mlflow` (tracking/registry)
+- `training`, `evaluation`, `security` (workers poll-based)
+- `minio` (object storage lakehouse)
+- `nessie` (catalog/versioning)
+- `spark` (batch medallion)
 
-| Conteneur | Rôle | Port | Image |
-|---|---|---|---|
-| **db** | Base de données PostgreSQL — stocke les runs, datasets, résultats, et les données MLflow | 5432 | `postgres:16-alpine` |
-| **api** | API REST FastAPI — CRUD des runs/datasets, point d'entrée des workers et de l'UI | 8000 | Custom (`Dockerfile.api`) |
-| **ui** | Interface Streamlit — configuration, suivi, résultats | 8501 | Custom (`Dockerfile.ui`) |
-| **mlflow** | MLflow Tracking Server — tracking d'expériences, model registry | 5000 | `ghcr.io/mlflow/mlflow` |
-| **training** | Worker d'entraînement — poll l'API, fine-tune les modèles via HuggingFace/LoRA | — | Custom (`Dockerfile.training`) |
-| **evaluation** | Worker d'évaluation — poll l'API, évalue les modèles avec RAGAS | — | Custom (`Dockerfile.evaluation`) |
-| **security** | Worker de sécurité — audit OWASP Top 10 LLM (garak, modelscan, DeepTeam) | — | Custom (`Dockerfile.security`) |
+## Composants principaux
 
-## Stack technique
-
-| Composant | Outil |
+| Composant | Rôle |
 |---|---|
-| UI | Streamlit |
-| API | FastAPI |
-| Base de données | PostgreSQL 16 |
-| ORM | SQLAlchemy 2 |
-| Tracking | MLflow |
-| Évaluation | RAGAS |
-| Fine-tuning | HuggingFace Transformers + PEFT/LoRA |
-| Sécurité LLM | garak (NVIDIA) + modelscan (ProtectAI) + DeepTeam (Confident AI) |
-| Audit PII | presidio-analyzer (Microsoft) |
-| Audit dépendances | pip-audit (PyPA) |
-| Conteneurisation | Docker Compose |
+| FastAPI | Orchestration des runs (`/runs`, `/datasets`) |
+| Workers | Exécution asynchrone training/evaluation/security |
+| MLflow | Tracking, model registry, tags de cycle de vie |
+| MinIO + Nessie + Spark | Ingestion et transformation lakehouse locale |
+| Streamlit | Interface de pilotage et suivi des runs |
 
-## Structure du projet
+## Lakehouse medallion
 
+Le flux data est structuré en trois couches :
+
+1. **Bronze** — données brutes append-only + métadonnées d'ingestion
+2. **Silver** — normalisation, typage et contrôles qualité
+3. **Gold** — datasets entraînement-ready + métadonnées de snapshot
+
+Scripts utiles :
+
+- `lakehouse/scripts/bootstrap_local.sh`
+- `lakehouse/scripts/run_bronze.sh`
+- `lakehouse/scripts/run_silver.sh`
+- `lakehouse/scripts/run_gold.sh`
+- `lakehouse/scripts/validate_reproducibility.sh`
+
+## API runs et références lakehouse
+
+`POST /runs` supporte désormais deux modes :
+
+- **Legacy**: `train_dataset_id` / `eval_dataset_id`
+- **Lakehouse**: `train_lakehouse_ref` / `eval_lakehouse_ref`
+
+Exemple de référence lakehouse :
+
+```json
+{
+  "catalog": "nessie",
+  "namespace": "gold",
+  "table": "rag_qa_train_ready",
+  "reference": "main",
+  "snapshot_id": "snapshot-20260316105535"
+}
 ```
-mlops/
-├── docker-compose.yml              # Orchestration des conteneurs
-├── docker/
-│   ├── Dockerfile.api              # Image API FastAPI
-│   ├── Dockerfile.ui               # Image Streamlit
-│   ├── Dockerfile.training         # Image worker entraînement
-│   ├── Dockerfile.evaluation       # Image worker évaluation
-│   └── Dockerfile.security        # Image worker sécurité (OWASP Top 10)
-├── api/
-│   ├── main.py                     # Endpoints REST (runs, datasets, résultats)
-│   └── schemas.py                  # Schémas Pydantic entrée/sortie
-├── ui/
-│   └── app.py                      # Application Streamlit (3 onglets)
-├── db/
-│   ├── models.py                   # Modèles SQLAlchemy (PipelineRun, Dataset, RunResult)
-│   ├── session.py                  # Connexion PostgreSQL
-│   └── init_db.py                  # Création des tables + seed des datasets
-├── workers/
-│   ├── training/
-│   │   └── worker.py               # Worker d'entraînement (poll + HuggingFace)
-│   ├── evaluation/
-│   │   └── worker.py               # Worker d'évaluation (poll + RAGAS)
-│   └── security/
-│       └── worker.py               # Worker de sécurité (poll + OWASP Top 10)
-├── src/
-│   ├── config.py                   # Modèles Pydantic pour config YAML
-│   ├── training.py                 # Logique de fine-tuning (standalone)
-│   ├── evaluation.py               # Logique d'évaluation RAGAS (standalone)
-│   └── pipeline.py                 # Pipeline Prefect (standalone)
-├── configs/                        # Configurations YAML d'exemple
-│   ├── finetune_rag_qa.yaml
-│   ├── eval_only.yaml
-│   └── multi_dataset.yaml
-├── data/
-│   ├── train/                      # Jeux de données d'entraînement (JSONL)
-│   │   ├── rag_qa_train.jsonl
-│   │   ├── medical_qa_train.jsonl
-│   │   └── legal_qa_train.jsonl
-│   └── eval/                       # Jeux de données d'évaluation RAGAS (JSONL)
-│       ├── ragas_eval.jsonl
-│       ├── medical_ragas_eval.jsonl
-│       └── legal_ragas_eval.jsonl
-├── main.py                         # Point d'entrée CLI (mode standalone)
-├── requirements.txt
-├── .env.example
-└── .dockerignore
-```
+
+Les workers résolvent ces références vers un dataset immuable et gardent un fallback sur le mode legacy.
 
 ## Démarrage rapide
 
-### 1. Cloner et configurer
-
 ```bash
 cp .env.example .env
-# Éditer .env si besoin (HF_TOKEN pour les modèles privés)
-```
-
-### 2. Lancer tous les conteneurs
-
-```bash
 docker compose up --build
 ```
 
-### 3. Accéder aux interfaces
+Interfaces :
 
-| Interface | URL |
-|---|---|
-| **Streamlit UI** | http://localhost:8501 |
-| **API FastAPI (docs)** | http://localhost:8000/docs |
-| **MLflow UI** | http://localhost:5000 |
+- Streamlit: `http://localhost:8501`
+- API docs: `http://localhost:8000/docs`
+- MLflow: `http://localhost:5001`
+- MinIO console: `http://localhost:9001`
+- Spark UI: `http://localhost:8081`
 
-### 4. Utilisation
+## Arborescence (résumé)
 
-1. Ouvrir l'UI Streamlit sur http://localhost:8501
-2. Onglet **Configuration** : choisir le modèle, le dataset, les hyperparamètres et les métriques RAGAS
-3. Cliquer sur **Valider & lancer le pipeline**
-4. Onglet **Status** : suivre la progression en temps réel
-5. Onglet **Résultats** : consulter les scores, graphiques comparatifs et exporter en CSV
-
-## API REST
-
-| Méthode | Endpoint | Description |
-|---|---|---|
-| `GET` | `/datasets` | Liste des datasets (filtrable par type) |
-| `POST` | `/runs` | Créer un nouveau run |
-| `GET` | `/runs` | Liste des runs (filtrable par statut) |
-| `GET` | `/runs/{id}` | Détail d'un run |
-| `PATCH` | `/runs/{id}/status` | Mettre à jour le statut |
-| `PATCH` | `/runs/{id}/logs` | Ajouter des logs |
-| `POST` | `/runs/{id}/results` | Ajouter des résultats (métriques) |
-
-## Base de données
-
-### Tables
-
-| Table | Description |
-|---|---|
-| `datasets` | Référence des jeux de données (nom, chemin, type, nombre de lignes) |
-| `pipeline_runs` | Runs de pipeline (config, statut, logs, liens MLflow/Prefect) |
-| `run_results` | Résultats métriques par run (nom, valeur) |
-
-Au démarrage, le conteneur API initialise les tables et seed 6 datasets d'exemple.
-
-## Format des données
-
-### Entraînement (JSONL)
-
-```json
-{"question": "...", "answer": "...", "context": "..."}
+```text
+mlops/
+├── api/                        # FastAPI + schémas
+├── workers/                    # training/evaluation/security + resolver lakehouse
+├── lakehouse/
+│   ├── jobs/                   # bronze/silver/gold spark jobs
+│   ├── contracts/              # contrats de schéma/source mapping
+│   ├── governance/             # guardrails medallion
+│   ├── scripts/                # bootstrap/exécution/maintenance
+│   ├── RUNBOOK.md
+│   └── ROLLOUT_CHECKLIST.md
+├── db/                         # modèles SQLAlchemy + seed/migrations
+├── ui/                         # Streamlit
+├── docker/                     # Dockerfiles services
+└── openspec/changes/...        # artefacts OpenSpec de changement
 ```
 
-### Évaluation RAGAS (JSONL)
+## Schémas UML
 
-```json
-{"question": "...", "answer": "...", "contexts": ["...", "..."], "ground_truth": "..."}
-```
-
-## Flux de données
-
-1. L'utilisateur configure un run via l'UI Streamlit
-2. L'UI envoie la config à l'API (`POST /runs`)
-3. L'API crée un `PipelineRun` en base (statut `pending`)
-4. Le **training worker** poll l'API, détecte le run `pending` de type `finetune`, lance l'entraînement, met le statut à `training` puis `evaluating`
-5. Le **evaluation worker** poll l'API, détecte les runs `evaluating` ou `eval_only` + `pending`, lance l'évaluation RAGAS, enregistre les scores et met le statut à `completed`
-6. Le **security worker** poll l'API, détecte les runs `pending` de type `security_eval`, lance l'audit de sécurité (statique + données + dynamique), calcule le MLSecScore et met le statut à `completed`
-7. L'UI affiche les résultats en temps réel via polling de l'API (scores RAGAS et/ou radar OWASP)
-
-## Configuration YAML (mode standalone)
-
-Les fichiers YAML dans `configs/` permettent aussi de lancer les pipelines en mode CLI :
-
-```bash
-python main.py configs/finetune_rag_qa.yaml
-```
+Les schémas UML (composants, séquence, activités, classes) sont disponibles dans `docs/uml_schemas.md`.
 
 ## Commandes utiles
 
 ```bash
-# Lancer uniquement certains services
-docker compose up db api ui
-
-# Voir les logs d'un conteneur
+docker compose up --build
+docker compose up -d db api minio nessie spark
 docker compose logs -f training
-
-# Reconstruire un conteneur
-docker compose build training
-
-# Arrêter et supprimer les volumes
 docker compose down -v
 ```
+
+## Notes importantes
+
+- Les artefacts runtime (`captures/`, `lakehouse/warehouse/`, `lakehouse/metadata/`, `__pycache__/`) sont ignorés par Git.
+- Le projet conserve le mode standalone (`main.py` + `src/`) en complément du mode Docker principal.
