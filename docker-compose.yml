@@ -67,6 +67,61 @@ services:
     volumes:
       - mlflow_artifacts:/mlflow/artifacts
 
+  # ── Lakehouse object storage (MinIO) ──────────────────────────────
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minio123}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - lakehouse_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Lakehouse catalog (Project Nessie) ────────────────────────────
+  nessie:
+    image: ghcr.io/projectnessie/nessie:0.104.5
+    ports:
+      - "19120:19120"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:19120/api/v1/config"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ── Spark batch engine for medallion pipelines ────────────────────
+  spark:
+    image: bitnamilegacy/spark:3.5
+    user: "0:0"
+    environment:
+      SPARK_MODE: master
+      SPARK_NO_DAEMONIZE: "yes"
+      SPARK_MASTER_HOST: spark
+      LAKEHOUSE_S3_ENDPOINT: ${LAKEHOUSE_S3_ENDPOINT:-http://minio:9000}
+      LAKEHOUSE_S3_BUCKET: ${LAKEHOUSE_S3_BUCKET:-lakehouse}
+      LAKEHOUSE_CATALOG_URI: ${LAKEHOUSE_CATALOG_URI:-http://nessie:19120/api/v1}
+      LAKEHOUSE_METADATA_DIR: /app/lakehouse/metadata
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minio}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minio123}
+    ports:
+      - "7077:7077"
+      - "8081:8080"
+    depends_on:
+      minio:
+        condition: service_healthy
+      nessie:
+        condition: service_healthy
+    volumes:
+      - ./lakehouse:/app/lakehouse:rw
+      - ./data:/app/data:ro
+
   # ── Worker d'entraînement ──────────────────────────────────────────
   training:
     build:
@@ -77,12 +132,17 @@ services:
       MLFLOW_TRACKING_URI: http://mlflow:5000
       POLL_INTERVAL: "10"
       OUTPUT_DIR: /app/outputs
+      LAKEHOUSE_ENABLED: ${LAKEHOUSE_ENABLED:-true}
+      LAKEHOUSE_S3_ENDPOINT: ${LAKEHOUSE_S3_ENDPOINT:-http://minio:9000}
+      LAKEHOUSE_S3_BUCKET: ${LAKEHOUSE_S3_BUCKET:-lakehouse}
+      LAKEHOUSE_CATALOG_URI: ${LAKEHOUSE_CATALOG_URI:-http://nessie:19120/api/v1}
     depends_on:
       - api
       - mlflow
     volumes:
       - ./data:/app/data:ro
       - model_outputs:/app/outputs
+      - ./lakehouse:/app/lakehouse:ro
     deploy:
       resources:
         reservations:
@@ -102,12 +162,18 @@ services:
       MISTRAL_MODEL: ${MISTRAL_MODEL:-mistral-small-latest}
       MLSCORE_THRESHOLD: ${MLSCORE_THRESHOLD:-0.7}
       TAG_SYNC_INTERVAL: ${TAG_SYNC_INTERVAL:-3600}
+      LAKEHOUSE_ENABLED: ${LAKEHOUSE_ENABLED:-true}
+      LAKEHOUSE_S3_ENDPOINT: ${LAKEHOUSE_S3_ENDPOINT:-http://minio:9000}
+      LAKEHOUSE_S3_BUCKET: ${LAKEHOUSE_S3_BUCKET:-lakehouse}
+      LAKEHOUSE_CATALOG_URI: ${LAKEHOUSE_CATALOG_URI:-http://nessie:19120/api/v1}
+      LAKEHOUSE_METADATA_DIR: /app/lakehouse/metadata
     depends_on:
       - api
       - mlflow
     volumes:
       - ./data:/app/data:ro
       - model_outputs:/app/outputs:ro
+      - ./lakehouse:/app/lakehouse:ro
 
   # ── Worker de sécurité (OWASP Top 10 LLM) ───────────────────────
   security:
@@ -119,14 +185,21 @@ services:
       MLFLOW_TRACKING_URI: http://mlflow:5000
       POLL_INTERVAL: "10"
       OUTPUT_DIR: /app/outputs
+      LAKEHOUSE_ENABLED: ${LAKEHOUSE_ENABLED:-true}
+      LAKEHOUSE_S3_ENDPOINT: ${LAKEHOUSE_S3_ENDPOINT:-http://minio:9000}
+      LAKEHOUSE_S3_BUCKET: ${LAKEHOUSE_S3_BUCKET:-lakehouse}
+      LAKEHOUSE_CATALOG_URI: ${LAKEHOUSE_CATALOG_URI:-http://nessie:19120/api/v1}
+      LAKEHOUSE_METADATA_DIR: /app/lakehouse/metadata
     depends_on:
       - api
       - mlflow
     volumes:
       - ./data:/app/data:ro
       - model_outputs:/app/outputs:ro
+      - ./lakehouse:/app/lakehouse:ro
 
 volumes:
   pgdata:
   model_outputs:
   mlflow_artifacts:
+  lakehouse_data:

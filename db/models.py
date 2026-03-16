@@ -64,6 +64,8 @@ class PipelineRun(Base):
     task_type = Column(String(50), nullable=False)
     train_dataset_id = Column(Integer, ForeignKey("datasets.id"), nullable=True)
     eval_dataset_id = Column(Integer, ForeignKey("datasets.id"), nullable=True)
+    train_lakehouse_ref = Column(JSON, nullable=True)
+    eval_lakehouse_ref = Column(JSON, nullable=True)
 
     training_params = Column(JSON, nullable=True)
     ragas_metrics_config = Column(JSON, nullable=True)

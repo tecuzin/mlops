@@ -17,6 +17,7 @@ RUN pip install --no-cache-dir \
     pip-audit>=2.7
 
 COPY workers/__init__.py /app/workers/__init__.py
+COPY workers/lakehouse_ref.py /app/workers/lakehouse_ref.py
 COPY workers/security/ /app/workers/security/
 COPY data/ /app/data/
 
