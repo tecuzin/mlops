@@ -7,13 +7,12 @@ from pathlib import Path
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 
+from lakehouse.jobs.spark_catalog import build_spark_session, publish_catalog_table
+
 
 def _spark() -> SparkSession:
-    return (
-        SparkSession.builder.appName("lakehouse-bronze-ingest")
-        .config("spark.sql.session.timeZone", "UTC")
-        .getOrCreate()
-    )
+    # build_spark_session wires spark.sql.catalog.nessie and related catalog settings.
+    return build_spark_session("lakehouse-bronze-ingest")
 
 
 def run() -> None:
@@ -34,6 +33,7 @@ def run() -> None:
         .withColumn("batch_id", F.lit(batch_id))
     )
 
+    publish_catalog_table(bronze_df, "bronze_rag_qa")
     bronze_df.write.mode("append").parquet(output_path)
     spark.stop()
 

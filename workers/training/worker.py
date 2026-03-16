@@ -33,6 +33,7 @@ MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5000")
 POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "10"))
 OUTPUT_DIR = os.getenv("OUTPUT_DIR", "/app/outputs")
 LAKEHOUSE_METADATA_DIR = os.getenv("LAKEHOUSE_METADATA_DIR", "/app/lakehouse/metadata")
+LAKEHOUSE_ENABLED = os.getenv("LAKEHOUSE_ENABLED", "true").lower() == "true"
 
 try:
     mlflow.enable_system_metrics_logging()
@@ -367,16 +368,19 @@ def _resolve_dataset_path(run: dict, ds_type: str) -> str:
     """Resolve dataset path from legacy dataset IDs or lakehouse snapshot references."""
     ref_key = f"{ds_type}_lakehouse_ref"
     lakehouse_ref = run.get(ref_key) or run["config_snapshot"].get(ref_key)
-    if lakehouse_ref:
+    if lakehouse_ref and LAKEHOUSE_ENABLED:
         path = resolve_lakehouse_dataset_path(lakehouse_ref, LAKEHOUSE_METADATA_DIR, role=ds_type)
         _log(run["id"], (
             f"Dataset {ds_type} résolu via lakehouse snapshot\n"
+            f"  catalog={lakehouse_ref.get('catalog', 'nessie')}\n"
             f"  table={lakehouse_ref.get('namespace')}.{lakehouse_ref.get('table')}\n"
             f"  ref={lakehouse_ref.get('reference', 'main')}\n"
             f"  snapshot={lakehouse_ref.get('snapshot_id')}\n"
             f"  path={path}"
         ))
         return path
+    if lakehouse_ref and not LAKEHOUSE_ENABLED:
+        _log(run["id"], f"LAKEHOUSE_ENABLED=false: fallback dataset {ds_type} via dataset_id")
 
     ds_id_key = f"{ds_type}_dataset_id"
     ds_id = run.get(ds_id_key) or run["config_snapshot"].get(f"{ds_type}_dataset_id")

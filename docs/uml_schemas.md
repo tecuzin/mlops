@@ -46,14 +46,14 @@ sequenceDiagram
     API-->>UI: 201 RunOut
 
     TW->>API: GET /runs?status=pending
-    TW->>Meta: Resolve train_lakehouse_ref(snapshot_id)
+    TW->>Meta: Resolve train_lakehouse_ref(catalog, reference, snapshot_id)
     TW->>API: PATCH status=training
     TW->>ML: start_run + log metrics
     TW->>API: POST /runs/{id}/results (train_loss, perplexity)
     TW->>API: PATCH status=evaluating
 
     EW->>API: GET /runs?status=evaluating
-    EW->>Meta: Resolve eval_lakehouse_ref(snapshot_id)
+    EW->>Meta: Resolve eval_lakehouse_ref(catalog, reference, snapshot_id)
     EW->>ML: log RAGAS + mlscore
     EW->>API: POST /runs/{id}/results (faithfulness, ...)
     EW->>API: PATCH status=completed
@@ -74,7 +74,8 @@ flowchart TD
     E -- Oui --> G[Silver Parquet]
     G --> H[Gold Materialize]
     H --> I[Gold Dataset Ready]
-    I --> J[Écriture metadata snapshot]
+    I --> N[Publication table via Nessie]
+    N --> J[Écriture metadata snapshot + catalog_commit_id]
     J --> K[Consommation workers via *_lakehouse_ref]
 ```
 

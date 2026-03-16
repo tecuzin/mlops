@@ -16,9 +16,11 @@ def resolve_lakehouse_dataset_path(
     if not ref:
         raise ValueError("Missing lakehouse reference")
 
-    namespace = ref.get("namespace")
-    table = ref.get("table")
-    snapshot_id = ref.get("snapshot_id")
+    catalog = (ref.get("catalog") or "nessie").strip()
+    namespace = (ref.get("namespace") or "").strip()
+    table = (ref.get("table") or "").strip()
+    reference = (ref.get("reference") or "main").strip()
+    snapshot_id = (ref.get("snapshot_id") or "").strip()
     if not namespace or not table or not snapshot_id:
         raise ValueError("Lakehouse reference must include namespace, table, and snapshot_id")
 
@@ -28,8 +30,14 @@ def resolve_lakehouse_dataset_path(
 
     metadata = json.loads(metadata_path.read_text())
     expected_table = f"{namespace}.{table}"
+    metadata_catalog = (metadata.get("catalog") or "nessie").strip()
+    metadata_reference = (metadata.get("reference") or "main").strip()
+    if metadata_catalog != catalog:
+        raise ValueError(f"Lakehouse catalog mismatch: expected {catalog}, got {metadata_catalog}")
     if metadata.get("table") != expected_table:
         raise ValueError(f"Lakehouse metadata table mismatch: expected {expected_table}")
+    if metadata_reference != reference:
+        raise ValueError(f"Lakehouse reference mismatch: expected {reference}, got {metadata_reference}")
     if metadata.get("snapshot_id") != snapshot_id:
         raise ValueError("Lakehouse snapshot mismatch between run reference and metadata")
 

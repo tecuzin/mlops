@@ -40,6 +40,21 @@ MinIO Console:
 ./lakehouse/scripts/run_gold.sh
 ```
 
+## Verify catalog-backed publication
+
+After running medallion jobs, confirm metadata contains explicit catalog identity:
+
+```bash
+python -m json.tool lakehouse/metadata/gold_rag_qa_train_ready.json
+```
+
+Expected keys:
+- `catalog` = `nessie`
+- `table` (for example `gold.rag_qa_train_ready`)
+- `reference` (for example `main`)
+- `snapshot_id`
+- `catalog_commit_id`
+
 ## Reset local lakehouse state
 
 ```bash

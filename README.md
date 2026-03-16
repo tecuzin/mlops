@@ -33,6 +33,9 @@ Le flux data est structuré en trois couches :
 2. **Silver** — normalisation, typage et contrôles qualité
 3. **Gold** — datasets entraînement-ready + métadonnées de snapshot
 
+Le catalog `nessie` est utilisé activement pour publier les tables medallion (Bronze/Silver/Gold) via Spark avec configuration Iceberg/Nessie.  
+Les workers consomment ensuite des exports figés validés par `catalog + table + reference + snapshot_id` avec fallback legacy si `LAKEHOUSE_ENABLED=false`.
+
 Scripts utiles :
 
 - `lakehouse/scripts/bootstrap_local.sh`
@@ -60,7 +63,7 @@ Exemple de référence lakehouse :
 }
 ```
 
-Les workers résolvent ces références vers un dataset immuable et gardent un fallback sur le mode legacy.
+Les workers rejettent explicitement les incohérences `catalog/reference/snapshot_id` et résolvent ces références vers un dataset immuable.
 
 ## Démarrage rapide
 
@@ -113,3 +116,4 @@ docker compose down -v
 
 - Les artefacts runtime (`captures/`, `lakehouse/warehouse/`, `lakehouse/metadata/`, `__pycache__/`) sont ignorés par Git.
 - Le projet conserve le mode standalone (`main.py` + `src/`) en complément du mode Docker principal.
+- Pour revenir au mode historique dataset-id/path, positionner `LAKEHOUSE_ENABLED=false` dans l'environnement des workers.

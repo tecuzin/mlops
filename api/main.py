@@ -24,6 +24,15 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="MLOps API", version="1.0.0", lifespan=lifespan)
 
 
+def _validate_lakehouse_ref(prefix: str, ref) -> None:
+    if ref is None:
+        return
+    if ref.catalog.strip().lower() != "nessie":
+        raise HTTPException(400, f"{prefix}.catalog doit valoir 'nessie'")
+    if not ref.snapshot_id.strip():
+        raise HTTPException(400, f"{prefix}.snapshot_id est requis")
+
+
 # ── Datasets ──────────────────────────────────────────────────────────
 
 @app.get("/datasets", response_model=list[DatasetOut])
@@ -38,10 +47,8 @@ def list_datasets(dataset_type: str | None = None, db: Session = Depends(get_db)
 
 @app.post("/runs", response_model=RunOut, status_code=201)
 def create_run(req: RunCreateRequest, db: Session = Depends(get_db)):
-    if req.train_lakehouse_ref and not req.train_lakehouse_ref.snapshot_id.strip():
-        raise HTTPException(400, "train_lakehouse_ref.snapshot_id est requis")
-    if req.eval_lakehouse_ref and not req.eval_lakehouse_ref.snapshot_id.strip():
-        raise HTTPException(400, "eval_lakehouse_ref.snapshot_id est requis")
+    _validate_lakehouse_ref("train_lakehouse_ref", req.train_lakehouse_ref)
+    _validate_lakehouse_ref("eval_lakehouse_ref", req.eval_lakehouse_ref)
 
     if req.task_type == "security_eval":
         if req.security_config is None:

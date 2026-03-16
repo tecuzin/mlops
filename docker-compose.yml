@@ -107,6 +107,9 @@ services:
       LAKEHOUSE_S3_ENDPOINT: ${LAKEHOUSE_S3_ENDPOINT:-http://minio:9000}
       LAKEHOUSE_S3_BUCKET: ${LAKEHOUSE_S3_BUCKET:-lakehouse}
       LAKEHOUSE_CATALOG_URI: ${LAKEHOUSE_CATALOG_URI:-http://nessie:19120/api/v1}
+      LAKEHOUSE_CATALOG_NAME: ${LAKEHOUSE_CATALOG_NAME:-nessie}
+      LAKEHOUSE_CATALOG_REF: ${LAKEHOUSE_CATALOG_REF:-main}
+      LAKEHOUSE_WAREHOUSE: ${LAKEHOUSE_WAREHOUSE:-s3a://lakehouse/warehouse}
       LAKEHOUSE_METADATA_DIR: /app/lakehouse/metadata
       AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minio}
       AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minio123}
@@ -136,6 +139,10 @@ services:
       LAKEHOUSE_S3_ENDPOINT: ${LAKEHOUSE_S3_ENDPOINT:-http://minio:9000}
       LAKEHOUSE_S3_BUCKET: ${LAKEHOUSE_S3_BUCKET:-lakehouse}
       LAKEHOUSE_CATALOG_URI: ${LAKEHOUSE_CATALOG_URI:-http://nessie:19120/api/v1}
+      LAKEHOUSE_CATALOG_NAME: ${LAKEHOUSE_CATALOG_NAME:-nessie}
+      LAKEHOUSE_CATALOG_REF: ${LAKEHOUSE_CATALOG_REF:-main}
+      LAKEHOUSE_WAREHOUSE: ${LAKEHOUSE_WAREHOUSE:-s3a://lakehouse/warehouse}
+      LAKEHOUSE_METADATA_DIR: /app/lakehouse/metadata
     depends_on:
       - api
       - mlflow
@@ -166,6 +173,9 @@ services:
       LAKEHOUSE_S3_ENDPOINT: ${LAKEHOUSE_S3_ENDPOINT:-http://minio:9000}
       LAKEHOUSE_S3_BUCKET: ${LAKEHOUSE_S3_BUCKET:-lakehouse}
       LAKEHOUSE_CATALOG_URI: ${LAKEHOUSE_CATALOG_URI:-http://nessie:19120/api/v1}
+      LAKEHOUSE_CATALOG_NAME: ${LAKEHOUSE_CATALOG_NAME:-nessie}
+      LAKEHOUSE_CATALOG_REF: ${LAKEHOUSE_CATALOG_REF:-main}
+      LAKEHOUSE_WAREHOUSE: ${LAKEHOUSE_WAREHOUSE:-s3a://lakehouse/warehouse}
       LAKEHOUSE_METADATA_DIR: /app/lakehouse/metadata
     depends_on:
       - api
@@ -189,6 +199,9 @@ services:
       LAKEHOUSE_S3_ENDPOINT: ${LAKEHOUSE_S3_ENDPOINT:-http://minio:9000}
       LAKEHOUSE_S3_BUCKET: ${LAKEHOUSE_S3_BUCKET:-lakehouse}
       LAKEHOUSE_CATALOG_URI: ${LAKEHOUSE_CATALOG_URI:-http://nessie:19120/api/v1}
+      LAKEHOUSE_CATALOG_NAME: ${LAKEHOUSE_CATALOG_NAME:-nessie}
+      LAKEHOUSE_CATALOG_REF: ${LAKEHOUSE_CATALOG_REF:-main}
+      LAKEHOUSE_WAREHOUSE: ${LAKEHOUSE_WAREHOUSE:-s3a://lakehouse/warehouse}
       LAKEHOUSE_METADATA_DIR: /app/lakehouse/metadata
     depends_on:
       - api
