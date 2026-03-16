@@ -1,0 +1,24 @@
+schema: spec-driven
+locale: en
+tdd: true
+parallel_tasks: true
+audit: true
+
+# Contexte du projet
+# Ceci est présenté à l’IA lors de la création d’artéfacts.
+context: |
+  Tech stack : Python 3.11, FastAPI, PostgreSQL, Docker, GitHub Actions
+  Conventions : Clean Code, GitHub Flow
+  Guides de style : PEP8, Black pour le formatage
+  Historique : Démarré en 2022 pour la digitalisation des processus internes, adoption progressive du TDD en 2023
+  Domaine : gestion de projets collaboratifs et automatisation de tâches
+
+# Règles par type d’artéfact
+rules:
+  proposal:
+    - Garder les propositions sous 350 mots
+    - Toujours inclure une section “Non-objectifs”
+    - Faire référence à des décisions historiques pertinentes si applicable
+  tasks:
+    - Limiter chaque tâche à une durée estimée de 2h max
+    - S’assurer que les tâches sont compatibles avec l’historique technique du projet
