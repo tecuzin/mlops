@@ -5,15 +5,13 @@ import os
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 
+from lakehouse.jobs.spark_catalog import build_spark_session, publish_catalog_table
 from lakehouse.quality.silver_quality import assert_silver_quality
 
 
 def _spark() -> SparkSession:
-    return (
-        SparkSession.builder.appName("lakehouse-silver-transform")
-        .config("spark.sql.session.timeZone", "UTC")
-        .getOrCreate()
-    )
+    # build_spark_session wires spark.sql.catalog.nessie and related catalog settings.
+    return build_spark_session("lakehouse-silver-transform")
 
 
 def run() -> None:
@@ -29,6 +27,7 @@ def run() -> None:
         .withColumn("context", F.trim(F.col("context")))
     )
     assert_silver_quality(silver_df)
+    publish_catalog_table(silver_df, "silver_rag_qa")
     silver_df.write.mode("overwrite").parquet(silver_path)
     spark.stop()
 

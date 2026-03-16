@@ -38,15 +38,19 @@ class LakehouseContractsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             metadata_dir = Path(tmp)
             metadata = {
+                "catalog": "nessie",
                 "table": "gold.rag_qa_train_ready",
+                "reference": "main",
                 "snapshot_id": "snapshot-20260316",
                 "training_export_path": "/tmp/train.jsonl",
                 "evaluation_export_path": "/tmp/eval.jsonl",
             }
             (metadata_dir / "gold_rag_qa_train_ready.json").write_text(json.dumps(metadata))
             ref = {
+                "catalog": "nessie",
                 "namespace": "gold",
                 "table": "rag_qa_train_ready",
+                "reference": "main",
                 "snapshot_id": "snapshot-20260316",
             }
 
@@ -54,6 +58,30 @@ class LakehouseContractsTests(unittest.TestCase):
             eval_path = resolve_lakehouse_dataset_path(ref, metadata_dir, role="eval")
             self.assertEqual(train_path, "/tmp/train.jsonl")
             self.assertEqual(eval_path, "/tmp/eval.jsonl")
+
+    def test_worker_lakehouse_ref_rejects_catalog_mismatch(self) -> None:
+        from workers.lakehouse_ref import resolve_lakehouse_dataset_path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            metadata_dir = Path(tmp)
+            metadata = {
+                "catalog": "nessie",
+                "table": "gold.rag_qa_train_ready",
+                "reference": "main",
+                "snapshot_id": "snapshot-20260316",
+                "training_export_path": "/tmp/train.jsonl",
+            }
+            (metadata_dir / "gold_rag_qa_train_ready.json").write_text(json.dumps(metadata))
+            bad_ref = {
+                "catalog": "other-catalog",
+                "namespace": "gold",
+                "table": "rag_qa_train_ready",
+                "reference": "main",
+                "snapshot_id": "snapshot-20260316",
+            }
+
+            with self.assertRaises(ValueError):
+                resolve_lakehouse_dataset_path(bad_ref, metadata_dir, role="train")
 
 
 if __name__ == "__main__":

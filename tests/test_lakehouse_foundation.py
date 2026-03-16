@@ -19,6 +19,9 @@ class LakehouseFoundationTests(unittest.TestCase):
         self.assertIn("LAKEHOUSE_ENABLED=true", env_example)
         self.assertIn("LAKEHOUSE_S3_ENDPOINT=http://minio:9000", env_example)
         self.assertIn("LAKEHOUSE_CATALOG_URI=http://nessie:19120/api/v1", env_example)
+        self.assertIn("LAKEHOUSE_METADATA_DIR=/app/lakehouse/metadata", env_example)
+        self.assertIn("LAKEHOUSE_CATALOG_NAME=nessie", env_example)
+        self.assertIn("LAKEHOUSE_CATALOG_REF=main", env_example)
 
     def test_runbook_exists(self) -> None:
         runbook = ROOT / "lakehouse" / "RUNBOOK.md"

@@ -34,6 +34,7 @@ POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "10"))
 OUTPUT_DIR = os.getenv("OUTPUT_DIR", "/app/outputs")
 LAKEHOUSE_METADATA_DIR = os.getenv("LAKEHOUSE_METADATA_DIR", "/app/lakehouse/metadata")
 MLSCORE_THRESHOLD = float(os.getenv("MLSCORE_THRESHOLD", "0.7"))
+LAKEHOUSE_ENABLED = os.getenv("LAKEHOUSE_ENABLED", "true").lower() == "true"
 
 METRIC_MAP = {
     "faithfulness": faithfulness,
@@ -78,16 +79,19 @@ def _notify(run_id: int, status: str, logs: str = "", metrics: dict | None = Non
 
 def _resolve_eval_path(run: dict) -> str:
     lakehouse_ref = run.get("eval_lakehouse_ref") or run["config_snapshot"].get("eval_lakehouse_ref")
-    if lakehouse_ref:
+    if lakehouse_ref and LAKEHOUSE_ENABLED:
         path = resolve_lakehouse_dataset_path(lakehouse_ref, LAKEHOUSE_METADATA_DIR, role="eval")
         _log(run["id"], (
             "Dataset eval résolu via lakehouse snapshot\n"
+            f"  catalog={lakehouse_ref.get('catalog', 'nessie')}\n"
             f"  table={lakehouse_ref.get('namespace')}.{lakehouse_ref.get('table')}\n"
             f"  ref={lakehouse_ref.get('reference', 'main')}\n"
             f"  snapshot={lakehouse_ref.get('snapshot_id')}\n"
             f"  path={path}"
         ))
         return path
+    if lakehouse_ref and not LAKEHOUSE_ENABLED:
+        _log(run["id"], "LAKEHOUSE_ENABLED=false: fallback dataset eval via dataset_id")
 
     ds_id = run.get("eval_dataset_id") or run["config_snapshot"].get("eval_dataset_id")
     if not ds_id:

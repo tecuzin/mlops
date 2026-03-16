@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class LoraParams(BaseModel):
@@ -49,6 +49,14 @@ class LakehouseRefIn(BaseModel):
     table: str
     reference: str = "main"
     snapshot_id: str
+
+    @field_validator("catalog", "namespace", "table", "reference", "snapshot_id")
+    @classmethod
+    def _not_blank(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("must not be blank")
+        return cleaned
 
 
 class RunCreateRequest(BaseModel):

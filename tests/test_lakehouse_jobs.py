@@ -19,6 +19,7 @@ class LakehouseJobsTests(unittest.TestCase):
         self.assertIn("ingestion_ts", bronze_job)
         self.assertIn("source_id", bronze_job)
         self.assertIn("batch_id", bronze_job)
+        self.assertIn("spark.sql.catalog.nessie", bronze_job)
 
     def test_contracts_and_quality_files_exist(self) -> None:
         contracts = ROOT / "lakehouse" / "contracts"
@@ -31,6 +32,12 @@ class LakehouseJobsTests(unittest.TestCase):
         gold_job = (ROOT / "lakehouse" / "jobs" / "gold_materialize.py").read_text()
         self.assertIn("snapshot", gold_job.lower())
         self.assertIn("metadata", gold_job.lower())
+        self.assertIn('"catalog"', gold_job)
+        self.assertIn('"reference"', gold_job)
+
+    def test_silver_job_uses_nessie_catalog(self) -> None:
+        silver_job = (ROOT / "lakehouse" / "jobs" / "silver_transform.py").read_text()
+        self.assertIn("spark.sql.catalog.nessie", silver_job)
 
 
 if __name__ == "__main__":

@@ -22,6 +22,7 @@
 
 - [ ] Run `run_gold.sh`
 - [ ] Validate snapshot metadata file output
+- [ ] Validate metadata includes `catalog`, `reference`, and `catalog_commit_id`
 - [ ] Confirm training-ready export paths are present
 
 ## Stage 5 - API and Worker Cutover
@@ -29,3 +30,4 @@
 - [ ] Create run payload with `train_lakehouse_ref` / `eval_lakehouse_ref`
 - [ ] Confirm workers resolve snapshot-bound paths
 - [ ] Verify fallback works when `LAKEHOUSE_ENABLED=false`
+- [ ] Verify mismatch on `catalog/reference/snapshot_id` fails loudly before processing
