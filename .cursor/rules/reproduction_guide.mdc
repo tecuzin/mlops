@@ -43,6 +43,21 @@ Ce guide permet à une IA de recréer l'intégralité du projet à partir de zé
 
 16b. **`workers/security/__init__.py`** — fichier vide
 16c. **`workers/security/worker.py`** — poll loop + `process_run()` : 3 phases (statique: modelscan/pip-audit/hash, données: presidio PII/intégrité, dynamique: garak/DeepTeam), calcul MLSecScore, MLflow
+16d. **`workers/lakehouse_ref.py`** — résolution des refs lakehouse (`*_lakehouse_ref`) vers chemins de datasets figés
+
+### Phase 5c — Lakehouse Medallion (local Docker)
+
+16e. **`lakehouse/__init__.py`** — package lakehouse
+16f. **`lakehouse/jobs/bronze_ingest.py`** — ingestion brute vers Bronze
+16g. **`lakehouse/jobs/silver_transform.py`** — normalisation + contrôles qualité Silver
+16h. **`lakehouse/jobs/gold_materialize.py`** — matérialisation Gold + metadata snapshot
+16i. **`lakehouse/quality/silver_quality.py`** — assertions de qualité Silver
+16j. **`lakehouse/contracts/bronze_schema.json`** — contrat de schéma Bronze
+16k. **`lakehouse/contracts/source_to_bronze_mapping.json`** — mapping source → Bronze
+16l. **`lakehouse/scripts/bootstrap_local.sh`** — création bucket MinIO local
+16m. **`lakehouse/scripts/run_bronze.sh`**, **`run_silver.sh`**, **`run_gold.sh`** — wrappers spark-submit
+16n. **`lakehouse/scripts/retention_cleanup.sh`**, **`compact_silver_gold.sh`**, **`validate_reproducibility.sh`** — maintenance et contrôles
+16o. **`lakehouse/RUNBOOK.md`** et **`lakehouse/ROLLOUT_CHECKLIST.md`** — exploitation et déploiement progressif
 
 ### Phase 6 — Mode standalone (Prefect)
 
@@ -76,11 +91,12 @@ Ce guide permet à une IA de recréer l'intégralité du projet à partir de zé
 35. **`docker/Dockerfile.training`** — python:3.11-slim, apt gcc g++, pip torch/transformers/peft/mlflow/etc., copie workers/training/ + data/
 36. **`docker/Dockerfile.evaluation`** — python:3.11-slim, apt gcc g++, pip torch/ragas/langchain-mistralai/etc., copie workers/evaluation/ + data/
 36b. **`docker/Dockerfile.security`** — python:3.11-slim, apt gcc g++, pip garak/modelscan/deepteam/presidio-analyzer/pip-audit/torch/etc., copie workers/security/ + data/
-37. **`docker-compose.yml`** — 7 services (db, api, ui, mlflow, training, evaluation, security) + 3 volumes (pgdata, model_outputs, mlflow_artifacts)
+37. **`docker-compose.yml`** — 10 services (db, api, ui, mlflow, training, evaluation, security, minio, nessie, spark) + volumes (`pgdata`, `model_outputs`, `mlflow_artifacts`, `lakehouse_data`)
 
 ### Phase 10 — Documentation
 
 38. **`README.md`** — architecture ASCII, tableau des conteneurs, stack, structure, démarrage rapide, API REST, schéma BDD, format données, flux, commandes utiles
+39. **`docs/uml_schemas.md`** — diagrammes UML (composants, séquence, activités medallion, classes)
 
 ## Commandes pour lancer le projet
 
@@ -107,9 +123,11 @@ python main.py configs/finetune_rag_qa.yaml outputs/
 - Les `__init__.py` de `api/`, `db/`, `src/`, `workers/training/`, `workers/evaluation/`, `workers/security/` sont vides mais nécessaires
 - Le script `db/init-multiple-dbs.sh` doit avoir les fins de ligne Unix (LF, pas CRLF)
 - Les workers n'utilisent **pas** Prefect — uniquement des boucles de polling HTTP
+- Les workers résolvent prioritairement `train_lakehouse_ref`/`eval_lakehouse_ref` si fournis, avec fallback `*_dataset_id`
 - Le mode standalone (`src/` + `main.py`) utilise Prefect `@flow` / `@task`
 - Les deux modes partagent la même logique métier mais avec des interfaces différentes
 - MLflow server écoute sur le port interne 5000, exposé en 5001 sur l'hôte
+- Le lakehouse local repose sur MinIO + Nessie + Spark et suit Bronze/Silver/Gold
 - Le training worker fusionne les poids LoRA (`merge_and_unload()`) avant sauvegarde
 - L'evaluation worker charge le modèle fusionné, génère les réponses, puis évalue avec RAGAS via Mistral comme LLM juge
 - Le security worker effectue des analyses statiques (modelscan, pip-audit), audite les données (PII via presidio), et lance des tests dynamiques (garak, DeepTeam)

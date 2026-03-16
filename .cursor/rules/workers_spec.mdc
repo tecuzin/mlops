@@ -25,13 +25,15 @@ def poll_loop():
 Fonctions utilitaires communes :
 - `_notify(run_id, status, logs, metrics, error)` — met à jour le statut/logs/résultats via l'API
 - `_log(run_id, message)` — log local + push vers l'API
-- `_resolve_dataset_path(run, ds_type)` — récupère le chemin fichier via `GET /datasets`
+- `_resolve_dataset_path(run, ds_type)` — résout via `*_lakehouse_ref` si présent, sinon fallback `GET /datasets`
+- `resolve_lakehouse_dataset_path(ref, ds_type)` (`workers/lakehouse_ref.py`) — lit les métadonnées Gold snapshot et renvoie un chemin figé
 
 Variables d'environnement :
 - `API_URL` (default `http://api:8000`)
 - `MLFLOW_TRACKING_URI` (default `http://mlflow:5000`)
 - `POLL_INTERVAL` (default `10` secondes)
 - `OUTPUT_DIR` (default `/app/outputs`)
+- `LAKEHOUSE_METADATA_DIR` (default `/app/lakehouse/metadata`)
 
 ## Worker Training (`workers/training/worker.py`)
 
@@ -50,14 +52,17 @@ Variables d'environnement :
    - Détection automatique des modules cibles via `_find_target_modules()` qui compare les modules demandés avec ceux du modèle
    - Fallback sur `KNOWN_LINEAR_NAMES` (q_proj, v_proj, k_proj, o_proj, gate_proj, up_proj, down_proj, c_attn, c_proj, c_fc, etc.)
    - Application via `get_peft_model(model, lora_config)`
-8. **Tokenisation dataset** : format `"### Question: {question}\n### Answer: {answer}"`, padding max_length, labels = input_ids
-9. **Entraînement** : `Trainer` de HuggingFace avec `TrainingArguments`, report_to="mlflow"
-10. **Post-training** :
+8. **Résolution dataset train** :
+   - Priorité `train_lakehouse_ref` avec snapshot obligatoire
+   - Fallback `train_dataset_id` (legacy)
+9. **Tokenisation dataset** : format `"### Question: {question}\n### Answer: {answer}"`, padding max_length, labels = input_ids
+10. **Entraînement** : `Trainer` de HuggingFace avec `TrainingArguments`, report_to="mlflow"
+11. **Post-training** :
     - Log des métriques (loss, perplexity, runtime, samples/sec, steps/sec, FLOPs)
     - Fusion LoRA : `model.merge_and_unload()`
     - Sauvegarde modèle + tokenizer dans `OUTPUT_DIR/{model_name}`
     - Enregistrement artefacts MLflow + Model Registry
-11. **Status → "evaluating"** (le worker d'évaluation prend le relais)
+12. **Status → "evaluating"** (le worker d'évaluation prend le relais)
 
 ### MLScore training
 Métriques remontées à l'API : `train_loss`, `perplexity`, `train_runtime`, `train_samples_per_second`
@@ -71,7 +76,7 @@ Métriques remontées à l'API : `train_loss`, `perplexity`, `train_runtime`, `t
 ### Étapes de `process_run(run)`
 
 1. **Status → "evaluating"** + log de la config
-2. **Chargement dataset évaluation** via `_resolve_eval_path()`
+2. **Chargement dataset évaluation** via `_resolve_eval_path()` (lakehouse prioritaire, legacy en fallback)
 3. **Phase d'inférence (si finetune)** :
    - Charge le modèle entraîné depuis `OUTPUT_DIR/{model_name}`
    - Génère les réponses pour chaque sample avec prompt : `"Context: {ctx}\n\nQuestion: {question}\n\nAnswer:"`
