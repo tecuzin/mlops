@@ -61,7 +61,12 @@ def _count_lines(path: str) -> int:
 
 def _migrate_enum_values():
     """Add any missing values to the PostgreSQL runstatus enum."""
-    required = ("pending", "training", "evaluating", "security_scanning", "completed", "failed")
+    # Legacy databases may store enum labels as upper-case member names,
+    # while newer code may rely on lower-case values. Keep both in sync.
+    required = (
+        "PENDING", "TRAINING", "EVALUATING", "SECURITY_SCANNING", "COMPLETED", "FAILED",
+        "pending", "training", "evaluating", "security_scanning", "completed", "failed",
+    )
     with engine.connect() as conn:
         for val in required:
             conn.execute(text(
