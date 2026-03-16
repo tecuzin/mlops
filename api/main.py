@@ -38,17 +38,23 @@ def list_datasets(dataset_type: str | None = None, db: Session = Depends(get_db)
 
 @app.post("/runs", response_model=RunOut, status_code=201)
 def create_run(req: RunCreateRequest, db: Session = Depends(get_db)):
+    if req.train_lakehouse_ref and not req.train_lakehouse_ref.snapshot_id.strip():
+        raise HTTPException(400, "train_lakehouse_ref.snapshot_id est requis")
+    if req.eval_lakehouse_ref and not req.eval_lakehouse_ref.snapshot_id.strip():
+        raise HTTPException(400, "eval_lakehouse_ref.snapshot_id est requis")
+
     if req.task_type == "security_eval":
         if req.security_config is None:
             raise HTTPException(400, "security_config est requis pour une évaluation de sécurité")
     else:
-        if req.eval_dataset_id is None:
-            raise HTTPException(400, "eval_dataset_id est requis pour ce type de tâche")
-        eval_ds = db.query(Dataset).get(req.eval_dataset_id)
-        if not eval_ds:
-            raise HTTPException(404, "Dataset d'évaluation introuvable")
+        if req.eval_dataset_id is None and req.eval_lakehouse_ref is None:
+            raise HTTPException(400, "eval_dataset_id ou eval_lakehouse_ref est requis pour ce type de tâche")
+        if req.eval_dataset_id is not None:
+            eval_ds = db.query(Dataset).get(req.eval_dataset_id)
+            if not eval_ds:
+                raise HTTPException(404, "Dataset d'évaluation introuvable")
 
-    if req.task_type == "finetune" and req.train_dataset_id is None:
+    if req.task_type == "finetune" and req.train_dataset_id is None and req.train_lakehouse_ref is None:
         raise HTTPException(400, "Un dataset d'entraînement est requis pour le fine-tuning")
 
     if req.train_dataset_id:
@@ -64,6 +70,8 @@ def create_run(req: RunCreateRequest, db: Session = Depends(get_db)):
         task_type=req.task_type,
         train_dataset_id=req.train_dataset_id,
         eval_dataset_id=req.eval_dataset_id,
+        train_lakehouse_ref=req.train_lakehouse_ref.model_dump() if req.train_lakehouse_ref else None,
+        eval_lakehouse_ref=req.eval_lakehouse_ref.model_dump() if req.eval_lakehouse_ref else None,
         training_params=req.training_params.model_dump() if req.training_params else None,
         ragas_metrics_config=req.ragas_metrics.model_dump(),
         security_config=req.security_config.model_dump() if req.security_config else None,

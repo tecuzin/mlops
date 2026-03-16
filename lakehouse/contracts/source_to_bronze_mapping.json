@@ -1,0 +1,12 @@
+{
+  "source_id": "rag_qa_train",
+  "source_format": "jsonl",
+  "source_path": "/app/data/train/rag_qa_train.jsonl",
+  "target_table": "bronze.rag_qa",
+  "target_path": "/app/lakehouse/warehouse/bronze/rag_qa",
+  "column_mapping": {
+    "question": "question",
+    "answer": "answer",
+    "context": "context"
+  }
+}

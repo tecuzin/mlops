@@ -64,6 +64,11 @@ psutil>=5.9
 - Image de base : `ghcr.io/mlflow/mlflow:v2.18.0`
 - Ajout : `psycopg2-binary>=2.9` (backend PostgreSQL)
 
+### Lakehouse local (`docker-compose.yml`)
+- MinIO : `minio/minio:latest`
+- Nessie : `ghcr.io/projectnessie/nessie:0.104.5`
+- Spark : `bitnamilegacy/spark:3.5`
+
 ### Mode standalone (`requirements.txt`)
 ```
 prefect>=3.0
@@ -88,6 +93,8 @@ bitsandbytes>=0.44
 | PostgreSQL 16 | BDD app + BDD MLflow | `DATABASE_URL` |
 | Mistral AI API | LLM juge pour RAGAS | `MISTRAL_API_KEY`, `MISTRAL_MODEL` |
 | HuggingFace Hub | Téléchargement modèles | `HF_TOKEN` (optionnel) |
+| MinIO (local) | Stockage lakehouse objet | `LAKEHOUSE_S3_ENDPOINT`, `LAKEHOUSE_S3_BUCKET` |
+| Nessie (local) | Catalog/versioning lakehouse | `LAKEHOUSE_CATALOG_URI` |
 
 ## Variables d'environnement (`.env.example`)
 
@@ -100,6 +107,13 @@ API_URL=http://api:8000
 MLFLOW_TRACKING_URI=http://mlflow:5000
 POLL_INTERVAL=10
 OUTPUT_DIR=/app/outputs
+LAKEHOUSE_ENABLED=true
+LAKEHOUSE_S3_ENDPOINT=http://minio:9000
+LAKEHOUSE_S3_BUCKET=lakehouse
+LAKEHOUSE_CATALOG_URI=http://nessie:19120/api/v1
+LAKEHOUSE_METADATA_DIR=/app/lakehouse/metadata
+MINIO_ROOT_USER=minio
+MINIO_ROOT_PASSWORD=minio123
 MISTRAL_API_KEY=xxxxxxxxxxxxxxxxxxxx
 MISTRAL_MODEL=mistral-small-latest
 # HF_TOKEN=hf_xxxxxxxxxxxxxxxxxxxx

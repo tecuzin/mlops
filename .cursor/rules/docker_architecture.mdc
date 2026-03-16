@@ -6,7 +6,7 @@ alwaysApply: true
 
 ## Composition (docker-compose.yml)
 
-7 services orchestrés par docker-compose :
+Services principaux + lakehouse local orchestrés par docker-compose :
 
 ### 1. `db` — PostgreSQL
 - Image : `postgres:16-alpine`
@@ -37,32 +37,50 @@ alwaysApply: true
 - Port exposé : 5001 → 5000 (interne)
 - Volume nommé `mlflow_artifacts`
 
-### 5. `training` — Worker d'entraînement
+### 5. `minio` — Object storage lakehouse
+- Image : `minio/minio:latest`
+- Ports exposés : `9000` (API S3) et `9001` (console)
+- Healthcheck : `GET /minio/health/live`
+- Volume nommé `lakehouse_data`
+
+### 6. `nessie` — Catalog/versioning lakehouse
+- Image : `ghcr.io/projectnessie/nessie:0.104.5`
+- Port exposé : `19120`
+- Healthcheck : `GET /api/v1/config`
+
+### 7. `spark` — Moteur batch medallion
+- Image : `bitnamilegacy/spark:3.5`
+- Mode : Spark master (service unique local)
+- Port exposé : `7077` (cluster) et `8081` (UI)
+- Dépend de `minio` + `nessie`
+- Volumes montés : `./lakehouse` + `./data`
+
+### 8. `training` — Worker d'entraînement
 - Dockerfile : `docker/Dockerfile.training`
 - CMD : `python -m workers.training.worker`
-- Copie : `workers/training/`, `data/`
+- Copie : `workers/training/`, `workers/lakehouse_ref.py`, `data/`
 - Dépend de `api` + `mlflow`
-- Env : `API_URL`, `MLFLOW_TRACKING_URI`, `POLL_INTERVAL`, `OUTPUT_DIR`
-- Volume `model_outputs` en lecture/écriture + `data/` en lecture seule
+- Env : `API_URL`, `MLFLOW_TRACKING_URI`, `POLL_INTERVAL`, `OUTPUT_DIR`, `LAKEHOUSE_*`
+- Volume `model_outputs` en lecture/écriture + `data/` en lecture seule + `lakehouse/` en lecture seule
 - Ressource : réservation mémoire 8G
 - Build : nécessite `gcc` + `g++` (pour torch, bitsandbytes)
 
-### 6. `evaluation` — Worker d'évaluation
+### 9. `evaluation` — Worker d'évaluation
 - Dockerfile : `docker/Dockerfile.evaluation`
 - CMD : `python -m workers.evaluation.worker`
-- Copie : `workers/evaluation/`, `data/`
+- Copie : `workers/evaluation/`, `workers/lakehouse_ref.py`, `data/`
 - Dépend de `api` + `mlflow`
-- Env : idem training + `MISTRAL_API_KEY`, `MISTRAL_MODEL`
-- Volume `model_outputs` en lecture seule + `data/` en lecture seule
+- Env : idem training + `MISTRAL_API_KEY`, `MISTRAL_MODEL`, `MLSCORE_THRESHOLD`, `TAG_SYNC_INTERVAL`
+- Volume `model_outputs` en lecture seule + `data/` en lecture seule + `lakehouse/` en lecture seule
 - Build : nécessite `gcc` + `g++` + `langchain-mistralai`
 
-### 7. `security` — Worker de sécurité (OWASP Top 10 LLM)
+### 10. `security` — Worker de sécurité (OWASP Top 10 LLM)
 - Dockerfile : `docker/Dockerfile.security`
 - CMD : `python -m workers.security.worker`
-- Copie : `workers/security/`, `data/`
+- Copie : `workers/security/`, `workers/lakehouse_ref.py`, `data/`
 - Dépend de `api` + `mlflow`
-- Env : `API_URL`, `MLFLOW_TRACKING_URI`, `POLL_INTERVAL`, `OUTPUT_DIR`
-- Volume `model_outputs` en lecture seule + `data/` en lecture seule
+- Env : `API_URL`, `MLFLOW_TRACKING_URI`, `POLL_INTERVAL`, `OUTPUT_DIR`, `LAKEHOUSE_*`
+- Volume `model_outputs` en lecture seule + `data/` en lecture seule + `lakehouse/` en lecture seule
 - Build : nécessite `gcc` + `g++` + `garak` + `modelscan` + `deepteam` + `presidio-analyzer` + `pip-audit`
 - Outils : garak (NVIDIA), modelscan (ProtectAI), DeepTeam (Confident AI), presidio-analyzer (Microsoft), pip-audit (PyPA)
 
@@ -73,6 +91,7 @@ alwaysApply: true
 | `pgdata` | db | Persistance PostgreSQL |
 | `model_outputs` | api, training (rw), evaluation (ro), security (ro) | Artefacts modèles entraînés |
 | `mlflow_artifacts` | mlflow | Artefacts MLflow |
+| `lakehouse_data` | minio | Persistance object storage lakehouse |
 
 ## Script init PostgreSQL (`db/init-multiple-dbs.sh`)
 
@@ -118,7 +137,7 @@ node_modules
 
 ```bash
 docker compose up --build              # Tout lancer
-docker compose up db api ui            # Lancer un sous-ensemble
+docker compose up -d db api minio nessie spark  # Démarrer fondation lakehouse
 docker compose logs -f training        # Suivre les logs
 docker compose build training          # Reconstruire un service
 docker compose down -v                 # Tout arrêter + supprimer volumes

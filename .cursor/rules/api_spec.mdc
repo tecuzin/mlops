@@ -31,8 +31,10 @@ async def lifespan(app: FastAPI):
 - Body : `RunCreateRequest`
 - Validations :
   - Si `task_type == "security_eval"` : `security_config` requis (sinon 400), `eval_dataset_id` optionnel
-  - Sinon : `eval_dataset_id` requis, le dataset d'évaluation doit exister (sinon 404)
-  - Si `task_type == "finetune"`, `train_dataset_id` est requis (sinon 400)
+  - Sinon : `eval_dataset_id` **ou** `eval_lakehouse_ref` requis
+  - Si `task_type == "finetune"`, `train_dataset_id` **ou** `train_lakehouse_ref` est requis
+  - Si `*_lakehouse_ref` est fourni, `snapshot_id` est obligatoire
+  - Si `*_dataset_id` fourni, le dataset doit exister (sinon 404)
   - Si `train_dataset_id` fourni, le dataset d'entraînement doit exister (sinon 404)
 - Crée un `PipelineRun` avec `status=PENDING`
 - Stocke `config_snapshot` = snapshot complet du payload (via `req.model_dump()`)
@@ -99,6 +101,13 @@ class SecurityScanConfigIn(BaseModel):
     max_probes_per_category: int = 50
     timeout_per_probe_seconds: int = 300
 
+class LakehouseRefIn(BaseModel):
+    catalog: str = "nessie"
+    namespace: str
+    table: str
+    reference: str = "main"
+    snapshot_id: str
+
 class RunCreateRequest(BaseModel):
     experiment_name: str = "mlops-default"
     model_name: str
@@ -106,6 +115,8 @@ class RunCreateRequest(BaseModel):
     task_type: str          # "finetune" | "eval_only" | "security_eval"
     train_dataset_id: int | None = None
     eval_dataset_id: int | None = None
+    train_lakehouse_ref: LakehouseRefIn | None = None
+    eval_lakehouse_ref: LakehouseRefIn | None = None
     training_params: TrainingParamsIn | None = None
     ragas_metrics: RagasMetricsIn = Field(default_factory=RagasMetricsIn)
     security_config: SecurityScanConfigIn | None = None
@@ -137,8 +148,12 @@ class RunOut(BaseModel):
     model_name: str
     model_id: str
     task_type: str
+    train_lakehouse_ref: dict | None
+    eval_lakehouse_ref: dict | None
     config_snapshot: dict
     mlflow_run_id: str | None
+    mlflow_model_name: str | None
+    mlflow_model_version: str | None
     prefect_flow_run_id: str | None
     created_at: datetime.datetime
     updated_at: datetime.datetime
