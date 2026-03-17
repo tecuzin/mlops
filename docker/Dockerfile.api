@@ -1,18 +1,14 @@
+# syntax=docker/dockerfile:1.7
 FROM python:3.11-slim
 
 WORKDIR /app
 
-RUN pip install --no-cache-dir \
-    fastapi>=0.115 \
-    uvicorn[standard]>=0.32 \
-    sqlalchemy>=2.0 \
-    psycopg2-binary>=2.9 \
-    pydantic>=2.9 \
-    httpx>=0.27
+COPY docker/requirements/api.txt /tmp/requirements.txt
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --no-cache-dir -r /tmp/requirements.txt
 
 COPY db/ /app/db/
 COPY api/ /app/api/
-COPY data/ /app/data/
 
 EXPOSE 8000
 
