@@ -1,0 +1,7 @@
+ragas>=0.2
+datasets>=3.0
+langchain-mistralai>=0.2
+peft>=0.12
+accelerate>=0.34
+sentencepiece>=0.2
+protobuf>=5.28

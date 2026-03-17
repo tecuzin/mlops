@@ -1,0 +1,5 @@
+garak>=0.14
+modelscan>=0.7
+deepteam>=1.0
+presidio-analyzer>=2.2
+pip-audit>=2.7
