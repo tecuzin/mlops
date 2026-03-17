@@ -1,12 +1,11 @@
+# syntax=docker/dockerfile:1.7
 FROM python:3.11-slim
 
 WORKDIR /app
 
-RUN pip install --no-cache-dir \
-    streamlit>=1.39 \
-    httpx>=0.27 \
-    pandas>=2.2 \
-    plotly>=5.24
+COPY docker/requirements/ui.txt /tmp/requirements.txt
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --no-cache-dir -r /tmp/requirements.txt
 
 COPY ui/ /app/ui/
 

@@ -7,3 +7,4 @@ __pycache__/
 captures/
 lakehouse/metadata/
 lakehouse/warehouse/
+.buildx-cache/
