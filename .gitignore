@@ -8,3 +8,5 @@ captures/
 lakehouse/metadata/
 lakehouse/warehouse/
 .buildx-cache/
+.env
+.env.local

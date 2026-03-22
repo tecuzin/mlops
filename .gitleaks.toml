@@ -1,0 +1,16 @@
+title = "mlops-gitleaks-config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Allow fake placeholders used in examples/docs"
+regexes = [
+  '''xxxxxxxxxxxxxxxxxxxx''',
+  '''hf_xxxxxxxxxxxxxxxxxxxx''',
+  '''change_me_[A-Za-z0-9_]+''',
+]
+paths = [
+  '''^\.env\.example$''',
+  '''^\.cursor/rules/.*\.mdc$''',
+]

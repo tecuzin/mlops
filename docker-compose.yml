@@ -4,16 +4,16 @@ services:
   db:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: mlops
-      POSTGRES_PASSWORD: mlops
-      POSTGRES_DB: mlops
+      POSTGRES_USER: ${POSTGRES_USER:-mlops_app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me_StrongDBPass_2026}
+      POSTGRES_DB: ${POSTGRES_DB:-mlops}
     ports:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./db/init-multiple-dbs.sh:/docker-entrypoint-initdb.d/init-multiple-dbs.sh:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U mlops"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mlops_app} -d ${POSTGRES_DB:-mlops}"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -24,7 +24,7 @@ services:
       context: .
       dockerfile: docker/Dockerfile.api
     environment:
-      DATABASE_URL: postgresql://mlops:mlops@db:5432/mlops
+      DATABASE_URL: ${DATABASE_URL:-postgresql://mlops_app:change_me_StrongDBPass_2026@db:5432/mlops}
     ports:
       - "8000:8000"
     depends_on:
@@ -55,10 +55,10 @@ services:
       mlflow server
       --host 0.0.0.0
       --port 5000
-      --backend-store-uri postgresql://mlops:mlops@db:5432/mlflow
+      --backend-store-uri postgresql://${POSTGRES_USER:-mlops_app}:${POSTGRES_PASSWORD:-change_me_StrongDBPass_2026}@db:5432/mlflow
       --default-artifact-root /mlflow/artifacts
     environment:
-      MLFLOW_TRACKING_URI: postgresql://mlops:mlops@db:5432/mlflow
+      MLFLOW_TRACKING_URI: postgresql://${POSTGRES_USER:-mlops_app}:${POSTGRES_PASSWORD:-change_me_StrongDBPass_2026}@db:5432/mlflow
     ports:
       - "5001:5000"
     depends_on:
@@ -72,8 +72,8 @@ services:
     image: minio/minio:latest
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minio123}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio_admin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-change_me_StrongMinioPass_2026}
     ports:
       - "9000:9000"
       - "9001:9001"
@@ -111,8 +111,8 @@ services:
       LAKEHOUSE_CATALOG_REF: ${LAKEHOUSE_CATALOG_REF:-main}
       LAKEHOUSE_WAREHOUSE: ${LAKEHOUSE_WAREHOUSE:-s3a://lakehouse/warehouse}
       LAKEHOUSE_METADATA_DIR: /app/lakehouse/metadata
-      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minio}
-      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minio123}
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minio_admin}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-change_me_StrongMinioPass_2026}
       AWS_REGION: ${AWS_REGION:-us-east-1}
       AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-us-east-1}
     ports:
